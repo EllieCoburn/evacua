@@ -7,3 +7,5 @@ dist/
 .vscode/
 .idea/
 *.log
+.env.local
+src/config.js
