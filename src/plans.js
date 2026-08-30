@@ -135,3 +135,21 @@ export class Plans {
     }, 2000);
   }
 }
+
+// Add cloud save method to Plans class
+Plans.prototype.saveToCloud = async function() {
+  if (!window.app.state.supabase?.user) {
+    this.showToast('Sign in to save to cloud', 'error');
+    return;
+  }
+  
+  try {
+    const result = await window.app.state.supabase.savePlan(this.current);
+    if (result) {
+      this.current.db_id = result.db_id || result.id;
+    }
+    this.showToast('Plan saved to cloud ☁️', 'success');
+  } catch (err) {
+    this.showToast(`Cloud save failed: ${err.message}`, 'error');
+  }
+};

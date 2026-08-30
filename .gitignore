@@ -9,3 +9,4 @@ dist/
 *.log
 .env.local
 src/config.js
+.env.local

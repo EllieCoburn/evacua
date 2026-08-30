@@ -4,6 +4,8 @@ import { History } from './history.js';
 import { Plans } from './plans.js';
 import { ToolManager } from './tools.js';
 import { Palette } from './palette.js';
+import { initSupabase } from './supabase.js';
+import { Auth } from './auth.js';
 
 // Global app state
 const state = {
@@ -13,6 +15,8 @@ const state = {
   tools: null,
   palette: null,
   plans: null,
+  auth: null,
+  supabase: null,
   
   selected: null,
   mode: 'select',
@@ -22,6 +26,7 @@ const state = {
   grid: true,
   snap: true,
   showDims: true,
+  userPlans: [],
 };
 
 // Bootstrap the app
@@ -29,15 +34,24 @@ async function init() {
   // Create core managers
   state.history = new History();
   state.palette = new Palette();
-  state.plans = new Plans();
+  state.plans = new Plans(state);
   state.canvas = new Canvas(document.getElementById('stage'), state);
   state.tools = new ToolManager(state);
   state.ui = new UI(state);
+  
+  // Initialize Supabase
+  state.supabase = await initSupabase();
+  state.auth = new Auth(state);
   
   // Initialize
   state.canvas.init();
   state.tools.init();
   state.ui.init();
+  
+  // Try to restore session
+  if (state.supabase) {
+    await state.auth.restoreSession();
+  }
   
   // Wire up global handlers
   setupGlobalHandlers();
@@ -112,6 +126,17 @@ function setupGlobalHandlers() {
       const action = btn.dataset.act;
       handleAction(action);
     }
+    
+    // Auth button
+    const authBtn = e.target.closest('[data-auth]');
+    if (authBtn) {
+      e.preventDefault();
+      if (state.supabase?.user) {
+        state.auth.signOut();
+      } else {
+        state.auth.showAuthModal();
+      }
+    }
   });
   
   // Panel toggles
@@ -143,7 +168,7 @@ function setupGlobalHandlers() {
     if (file) {
       await state.plans.open(file);
     }
-    e.target.value = ''; // Reset for same file
+    e.target.value = '';
   });
 }
 
@@ -167,7 +192,11 @@ function handleAction(action) {
       break;
       
     case 'save':
-      state.plans.save();
+      if (state.supabase?.user) {
+        state.plans.saveToCloud();
+      } else {
+        state.plans.save();
+      }
       break;
       
     case 'undo':
