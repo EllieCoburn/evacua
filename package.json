@@ -1,0 +1,16 @@
+{
+  "name": "evacua",
+  "version": "1.0.0",
+  "description": "Fire escape plan maker - create professional emergency evacuation maps",
+  "main": "index.html",
+  "type": "module",
+  "keywords": [
+    "fire escape",
+    "evacuation plan",
+    "emergency preparedness",
+    "canvas",
+    "drawing"
+  ],
+  "author": "Evacua",
+  "license": "MIT"
+}

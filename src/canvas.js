@@ -55,6 +55,8 @@ export class Canvas {
   
   onMouseDown(e) {
     const [x, y] = this.getCanvasCoords(e);
+    this.lastX = x;
+    this.lastY = y;
     
     const tool = this.state.tools.current;
     if (tool?.onMouseDown) {
@@ -64,6 +66,8 @@ export class Canvas {
   
   onMouseMove(e) {
     const [x, y] = this.getCanvasCoords(e);
+    this.lastX = x;
+    this.lastY = y;
     
     // Update status bar
     const ft = (x / this.gridSize).toFixed(1);
@@ -133,7 +137,7 @@ export class Canvas {
     
     // Clear
     ctx.fillStyle = '#f5f5f5';
-    ctx.fillRect(0, 0, this.el.width, this.el.height);
+    ctx.fillRect(0, 0, this.el.width / this.dpr, this.el.height / this.dpr);
     
     // Save context state
     ctx.save();
