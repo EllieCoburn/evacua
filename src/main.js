@@ -1,9 +1,8 @@
 import { ImageProcessor } from './image-processor.js';
 import { Overlay } from './overlay.js';
 import { ICONS, preloadIcons } from './icon-library.js';
-import { cleanFloorPlan } from './plan-cleaner.js';
-import { vectorizeFloorPlan, renderVectorPlan, findWallAt } from './plan-vectorizer.js';
-import { vectorizeCV, renderCVPlan, findComponentAt, loadOpenCV } from './plan-vectorizer-cv.js';
+import { visionRequest, warmupVision, sourceToImageData } from './vision-client.js';
+import { renderPlanCanvas, renderTraceCanvas, findComponentAt } from './plan-render.js';
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
@@ -41,7 +40,7 @@ function init() {
 
   // Warm up the vision engine in the background so the first upload
   // reconstructs without waiting on the download
-  loadOpenCV().catch(err => console.warn('Vision engine preload failed:', err));
+  warmupVision();
 }
 
 function setupCanvases() {
@@ -64,56 +63,116 @@ function setupCanvases() {
   state.overlay.onWallErase = (pos) => eraseWallAt(pos);
 }
 
+// ---- Processing overlay ----
+
+function showProcessing(label) {
+  const overlay = document.getElementById('processing-overlay');
+  if (overlay) overlay.hidden = false;
+  setProgress(0, label);
+}
+
+function setProgress(pct, label) {
+  const fill = document.getElementById('processing-fill');
+  const pctEl = document.getElementById('processing-pct');
+  const labelEl = document.getElementById('processing-label');
+  if (fill) fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+  if (label && labelEl) labelEl.textContent = label;
+}
+
+function hideProcessing() {
+  const overlay = document.getElementById('processing-overlay');
+  if (overlay) overlay.hidden = true;
+}
+
 // Reconstruct the floor plan from the original upload and swap it in as the
-// base. Uses the OpenCV vision engine, with the legacy scan-line extractor
-// as a fallback if the engine can't load.
+// base. All analysis runs in the vision worker (background thread) so the
+// UI stays responsive; progress is shown in the overlay.
 async function reconstructPlan({ silent = false } = {}) {
   if (!state.originalImage) {
     if (!silent) showToast('Upload a floor plan first', 'error');
     return false;
   }
 
-  let plan = null;
+  showProcessing('Preparing image…');
+
   try {
-    plan = await vectorizeCV(state.originalImage, state.vectorOpts);
-  } catch (err) {
-    console.warn('Vision engine unavailable, using fallback extractor:', err);
-  }
+    const srcW = state.originalImage.naturalWidth || state.originalImage.width;
+    const srcH = state.originalImage.naturalHeight || state.originalImage.height;
 
-  if (!plan || plan.wallCount < 2) {
-    const legacy = vectorizeFloorPlan(state.originalImage, state.vectorOpts);
-    const legacyPlan = { mode: 'legacy', ...legacy, wallCount: legacy.walls.length, windows: [] };
-    if (!plan || legacyPlan.wallCount > plan.wallCount) plan = legacyPlan;
-  }
+    let plan = null;
+    try {
+      const { imageData, scale } = sourceToImageData(state.originalImage, 1600);
+      const result = await visionRequest(
+        'vectorize',
+        {
+          width: imageData.width,
+          height: imageData.height,
+          buffer: imageData.data.buffer,
+          opts: state.vectorOpts
+        },
+        (pct, label) => setProgress(pct, label),
+        [imageData.data.buffer]
+      );
 
-  state.vectorPlan = plan;
+      // Scale geometry from working resolution to source coordinates
+      const inv = 1 / scale;
+      for (const comp of result.components) {
+        for (const ring of comp.rings) {
+          for (const p of ring) { p.x *= inv; p.y *= inv; }
+        }
+      }
+      for (const d of result.doors) { d.x *= inv; d.y *= inv; d.length *= inv; }
+      for (const win of result.windows) { win.x *= inv; win.y *= inv; win.length *= inv; }
+      result.wallThickness *= inv;
+      result.width = srcW;
+      result.height = srcH;
 
-  if (plan.wallCount < 2) {
-    // Not enough structure found — keep the raster trace as the base
+      plan = { mode: 'cv', ...result };
+    } catch (err) {
+      console.warn('Vision engine reconstruction failed:', err);
+    }
+
+    if (plan && plan.wallCount >= 2) {
+      state.vectorPlan = plan;
+      state.cleanPlan = renderPlanCanvas(plan);
+      state.view = 'clean';
+      state.imageProcessor.currentImage = state.cleanPlan;
+      state.imageProcessor.fitToScreen();
+      state.imageProcessor.render();
+      state.overlay.render();
+      updateViewToggle();
+      updateVectorStats(plan, false);
+      if (!silent) showToast(planSummary(plan), 'success');
+      return true;
+    }
+
+    // Fallback: simple traced version (also computed in the worker)
+    setProgress(30, 'Tracing plan outline…');
+    const { imageData: traceData } = sourceToImageData(state.originalImage, 1800);
+    const trace = await visionRequest(
+      'trace',
+      { width: traceData.width, height: traceData.height, buffer: traceData.data.buffer },
+      (pct, label) => setProgress(pct, label),
+      [traceData.data.buffer]
+    );
+
+    state.vectorPlan = plan; // may be null or a too-sparse plan
+    state.cleanPlan = renderTraceCanvas(trace);
+    state.view = 'clean';
+    state.imageProcessor.currentImage = state.cleanPlan;
+    state.imageProcessor.fitToScreen();
+    state.imageProcessor.render();
+    state.overlay.render();
+    updateViewToggle();
     updateVectorStats(plan, true);
     if (!silent) {
-      showToast('Not enough wall structure found — showing the traced version instead', 'info');
+      showToast('Not enough wall structure found — showing a traced version instead', 'info');
     }
     return false;
+  } finally {
+    hideProcessing();
   }
-
-  state.cleanPlan = renderPlan(plan);
-  state.view = 'clean';
-  state.imageProcessor.currentImage = state.cleanPlan;
-  state.imageProcessor.fitToScreen();
-  state.imageProcessor.render();
-  state.overlay.render();
-  updateViewToggle();
-  updateVectorStats(plan, false);
-
-  if (!silent) {
-    showToast(planSummary(plan), 'success');
-  }
-  return true;
-}
-
-function renderPlan(plan) {
-  return plan.mode === 'cv' ? renderCVPlan(plan) : renderVectorPlan(plan);
 }
 
 function planSummary(plan) {
@@ -127,35 +186,29 @@ function updateVectorStats(plan, fellBack) {
   const el = document.getElementById('vector-stats');
   if (!el) return;
   if (!plan) {
-    el.textContent = '';
+    el.textContent = fellBack
+      ? 'Reconstruction unavailable — showing a traced version. Try Reconstruct again once online.'
+      : '';
   } else if (fellBack) {
-    el.textContent = `Found only ${plan.wallCount} wall sections — using the traced image as the base. Try lowering Minimum Wall Length.`;
+    el.textContent = `Found only ${plan.wallCount} wall sections — showing a traced version instead. Try lowering Minimum Wall Length.`;
   } else {
-    const engine = plan.mode === 'cv' ? 'Vision engine' : 'Fallback extractor';
-    el.textContent = `${engine}: ${plan.wallCount} wall sections, ${plan.doors?.length || 0} doors, ` +
+    el.textContent = `${plan.wallCount} wall sections, ${plan.doors?.length || 0} doors, ` +
       `${plan.windows?.length || 0} windows. Use the Wall Eraser to remove any false walls.`;
   }
 }
 
 function eraseWallAt(pos) {
-  if (!state.vectorPlan) return;
+  const plan = state.vectorPlan;
+  if (!plan || !plan.components) return;
 
   const { imageX, imageY } = state.imageProcessor.canvasToImageCoords(pos.x, pos.y);
-  const plan = state.vectorPlan;
+  const idx = findComponentAt(plan, imageX, imageY);
+  if (idx === -1) return;
 
-  if (plan.mode === 'cv') {
-    const idx = findComponentAt(plan, imageX, imageY);
-    if (idx === -1) return;
-    plan.components.splice(idx, 1);
-    plan.wallCount = plan.components.length;
-  } else {
-    const idx = findWallAt(plan, imageX, imageY);
-    if (idx === -1) return;
-    plan.walls.splice(idx, 1);
-    plan.wallCount = plan.walls.length;
-  }
+  plan.components.splice(idx, 1);
+  plan.wallCount = plan.components.length;
 
-  state.cleanPlan = renderPlan(plan);
+  state.cleanPlan = renderPlanCanvas(plan);
   if (state.view === 'clean') {
     state.imageProcessor.currentImage = state.cleanPlan;
     state.imageProcessor.render();
@@ -604,35 +657,25 @@ async function loadImage(file) {
     await state.imageProcessor.loadImage(loadSource);
     state.originalImage = state.imageProcessor.currentImage;
 
-    // Analyze and reconstruct the floor plan automatically
-    showToast('Analyzing floor plan structure...', 'info');
-    await new Promise(resolve => setTimeout(resolve, 30)); // let the toast paint
+    // Show the original immediately, then reconstruct in the background
+    // worker with the progress overlay — the UI never freezes
+    state.view = 'original';
+    updateViewToggle();
 
     try {
-      // Raster trace first — the fallback base if reconstruction finds
-      // too little structure (e.g. a photo of a room, not of a plan)
-      state.cleanPlan = cleanFloorPlan(state.originalImage);
-      state.view = 'clean';
-      state.imageProcessor.currentImage = state.cleanPlan;
-      state.imageProcessor.fitToScreen();
-      state.imageProcessor.render();
-      updateViewToggle();
-
-      // Full vector reconstruction: extract wall geometry and redraw.
-      // Every source converges to the same clean drafted output.
       await reconstructPlan({ silent: true });
 
       if (state.vectorPlan && state.vectorPlan.wallCount >= 2) {
         showToast(planSummary(state.vectorPlan) + ' — add your symbols, or refine in the Convert tab', 'success');
       } else {
-        showToast('Converted to a traced plan — for a full reconstruction, try the Convert tab', 'info');
+        showToast('Converted to a traced plan — tune and re-run in the Convert tab', 'info');
       }
-    } catch (cleanErr) {
-      console.error('Auto-conversion failed, showing original:', cleanErr);
+    } catch (convErr) {
+      console.error('Auto-conversion failed, showing original:', convErr);
       state.cleanPlan = null;
       state.view = 'original';
       updateViewToggle();
-      showToast('Floor plan loaded (couldn\'t auto-convert this one)', 'info');
+      showToast('Floor plan loaded (conversion unavailable — you can still annotate the original)', 'info');
     }
 
     // Render overlay
