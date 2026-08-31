@@ -1,250 +1,295 @@
-import { Canvas } from './canvas.js';
-import { UI } from './ui.js';
-import { History } from './history.js';
-import { Plans } from './plans.js';
-import { ToolManager } from './tools.js';
-import { Palette } from './palette.js';
-import { initSupabase } from './supabase.js';
-import { Auth } from './auth.js';
+import { ImageProcessor } from './image-processor.js';
+import { Overlay } from './overlay.js';
+import { ICONS } from './icon-library.js';
 
-// Global app state
 const state = {
-  canvas: null,
-  ui: null,
-  history: null,
-  tools: null,
-  palette: null,
-  plans: null,
-  auth: null,
-  supabase: null,
-  
-  selected: null,
-  mode: 'select',
-  zoom: 1,
-  panX: 0,
-  panY: 0,
-  grid: true,
-  snap: true,
-  showDims: true,
-  userPlans: [],
+  imageProcessor: null,
+  overlay: null,
+  currentPlan: null,
 };
 
-// Bootstrap the app
-async function init() {
-  // Create core managers
-  state.history = new History();
-  state.palette = new Palette();
-  state.plans = new Plans(state);
-  state.canvas = new Canvas(document.getElementById('stage'), state);
-  state.tools = new ToolManager(state);
-  state.ui = new UI(state);
-  
-  // Initialize Supabase
-  state.supabase = await initSupabase();
-  state.auth = new Auth(state);
-  
-  // Initialize
-  state.canvas.init();
-  state.tools.init();
-  state.ui.init();
-  
-  // Try to restore session
-  if (state.supabase) {
-    await state.auth.restoreSession();
-  }
-  
-  // Wire up global handlers
-  setupGlobalHandlers();
-  
-  // Create a new blank plan
-  state.plans.new();
-  
+function init() {
+  setupCanvases();
+  setupEventListeners();
+  setupToolButtons();
+  setupIconButtons();
   console.log('Evacua initialized');
 }
 
-function setupGlobalHandlers() {
-  // Keyboard shortcuts
-  document.addEventListener('keydown', e => {
-    const isMod = e.ctrlKey || e.metaKey;
-    
-    switch (true) {
-      case isMod && e.key === 'n':
-        e.preventDefault();
-        handleAction('new');
-        break;
-      case isMod && e.key === 'o':
-        e.preventDefault();
-        handleAction('open');
-        break;
-      case isMod && e.key === 's':
-        e.preventDefault();
-        handleAction('save');
-        break;
-      case isMod && e.key === 'z' && !e.shiftKey:
-        e.preventDefault();
-        handleAction('undo');
-        break;
-      case isMod && (e.key === 'z' || e.key === 'y') && e.shiftKey:
-        e.preventDefault();
-        handleAction('redo');
-        break;
-      case isMod && e.key === 'p':
-        e.preventDefault();
-        handleAction('print');
-        break;
-      case e.key === '-' || e.key === '_':
-        e.preventDefault();
-        handleAction('zoom-out');
-        break;
-      case e.key === '+' || e.key === '=':
-        e.preventDefault();
-        handleAction('zoom-in');
-        break;
-      case e.key === '0':
-        e.preventDefault();
-        handleAction('zoom-fit');
-        break;
-      case e.key === 'Escape':
-        e.preventDefault();
-        state.tools.selectTool('select');
-        state.canvas.deselect();
-        break;
-      case e.key === 'Delete' || e.key === 'Backspace':
-        if (state.selected) {
-          e.preventDefault();
-          state.plans.remove(state.selected);
-          state.canvas.deselect();
-        }
-        break;
-    }
-  });
-  
-  // Action buttons
-  document.addEventListener('click', e => {
-    const btn = e.target.closest('[data-act]');
-    if (btn) {
-      const action = btn.dataset.act;
-      handleAction(action);
-    }
-    
-    // Auth button
-    const authBtn = e.target.closest('[data-auth]');
-    if (authBtn) {
-      e.preventDefault();
-      if (state.supabase?.user) {
-        state.auth.signOut();
-      } else {
-        state.auth.showAuthModal();
-      }
-    }
-  });
-  
-  // Panel toggles
-  document.addEventListener('click', e => {
-    if (e.target.matches('[data-tab]')) {
-      const tab = e.target.dataset.tab;
-      state.ui.showPanel(tab);
-    }
-  });
-  
-  // Options checkboxes
-  document.getElementById('opt-grid').addEventListener('change', e => {
-    state.grid = e.target.checked;
-    state.canvas.render();
-  });
-  
-  document.getElementById('opt-snap').addEventListener('change', e => {
-    state.snap = e.target.checked;
-  });
-  
-  document.getElementById('opt-dims').addEventListener('change', e => {
-    state.showDims = e.target.checked;
-    state.canvas.render();
-  });
-  
-  // File input for opening plans
-  document.getElementById('file-input').addEventListener('change', async e => {
+function setupCanvases() {
+  const imageCanvas = document.getElementById('image-canvas');
+  const overlayCanvas = document.getElementById('overlay-canvas');
+
+  // Set canvas size to window size
+  const resizeCanvases = () => {
+    imageCanvas.width = imageCanvas.offsetWidth;
+    imageCanvas.height = imageCanvas.offsetHeight;
+    overlayCanvas.width = overlayCanvas.offsetWidth;
+    overlayCanvas.height = overlayCanvas.offsetHeight;
+  };
+
+  resizeCanvases();
+  window.addEventListener('resize', resizeCanvases);
+
+  // Initialize processors
+  state.imageProcessor = new ImageProcessor(imageCanvas, overlayCanvas);
+  state.overlay = new Overlay(overlayCanvas, state.imageProcessor);
+}
+
+function setupEventListeners() {
+  // File input
+  document.getElementById('file-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (file) {
-      await state.plans.open(file);
+      await loadImage(file);
     }
     e.target.value = '';
   });
+
+  // Upload zone drag-and-drop
+  const uploadZone = document.getElementById('upload-zone');
+  uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadZone.style.backgroundColor = 'rgba(0, 0, 0, 0.05)';
+  });
+
+  uploadZone.addEventListener('dragleave', () => {
+    uploadZone.style.backgroundColor = '';
+  });
+
+  uploadZone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      await loadImage(file);
+    }
+  });
+
+  // Tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      showTab(tab, btn.closest('.panel'));
+    });
+  });
+
+  // Canvas controls
+  document.querySelectorAll('[data-ctrl]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ctrl = btn.dataset.ctrl;
+      handleCanvasControl(ctrl);
+    });
+  });
+
+  // Action buttons
+  document.querySelectorAll('[data-act]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.act;
+      handleAction(action);
+    });
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      state.imageProcessor.zoomIn();
+    } else if (e.key === '-') {
+      e.preventDefault();
+      state.imageProcessor.zoomOut();
+    } else if (e.key === '0') {
+      e.preventDefault();
+      state.imageProcessor.fitToScreen();
+      state.imageProcessor.render();
+    } else if (e.key === 'Delete') {
+      if (state.overlay.selectedElement) {
+        state.overlay.removeElement(state.overlay.selectedElement);
+      }
+    }
+  });
 }
 
-// Main action dispatcher
-function handleAction(action) {
-  console.log('Action:', action);
-  
-  switch (action) {
-    case 'new':
-      if (confirm('Start a new plan? Unsaved changes will be lost.')) {
-        state.plans.new();
-      }
-      break;
+function setupToolButtons() {
+  document.querySelectorAll('[data-tool]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tool = btn.dataset.tool;
       
-    case 'templates':
-      state.ui.showTemplatesDialog();
-      break;
+      // Update active state
+      document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      state.overlay.setTool(tool);
+    });
+  });
+}
+
+function setupIconButtons() {
+  document.querySelectorAll('[data-icon]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const iconType = btn.dataset.icon;
       
-    case 'open':
-      document.getElementById('file-input').click();
-      break;
-      
-    case 'save':
-      if (state.supabase?.user) {
-        state.plans.saveToCloud();
+      if (ICONS[iconType]?.isRoute) {
+        // For routes, switch to draw mode
+        state.overlay.currentIconType = iconType;
+        state.overlay.setTool('draw-arrow');
+        showToast(`Click canvas to start ${ICONS[iconType].name}`, 'info');
       } else {
-        state.plans.save();
+        // For icons, enter placement mode
+        state.overlay.setIconTool(iconType);
+        showToast(`Click to place ${ICONS[iconType].name}`, 'info');
       }
-      break;
-      
-    case 'undo':
-      if (state.history.canUndo()) {
-        state.history.undo();
-        state.canvas.render();
-      }
-      break;
-      
-    case 'redo':
-      if (state.history.canRedo()) {
-        state.history.redo();
-        state.canvas.render();
-      }
-      break;
-      
-    case 'print':
-      state.canvas.printPDF();
-      break;
-      
-    case 'export':
-      state.canvas.exportPNG();
-      break;
-      
-    case 'help':
-      state.ui.showHelpDialog();
-      break;
-      
+    });
+  });
+}
+
+async function loadImage(file) {
+  try {
+    await state.imageProcessor.loadImage(file);
+    
+    // Show editor, hide upload zone
+    document.getElementById('upload-zone').style.display = 'none';
+    document.getElementById('editor-container').style.display = 'flex';
+    
+    // Re-render overlay
+    state.overlay.render();
+
+    showToast('Image loaded! Start adding evacuation markers', 'success');
+  } catch (err) {
+    showToast(`Failed to load image: ${err.message}`, 'error');
+  }
+}
+
+function handleCanvasControl(ctrl) {
+  switch (ctrl) {
     case 'zoom-in':
-      state.canvas.zoom(state.zoom * 1.25);
+      state.imageProcessor.zoomIn();
       break;
-      
     case 'zoom-out':
-      state.canvas.zoom(state.zoom / 1.25);
+      state.imageProcessor.zoomOut();
       break;
-      
-    case 'zoom-fit':
-      state.canvas.fitToScreen();
+    case 'fit-screen':
+      state.imageProcessor.fitToScreen();
+      state.imageProcessor.render();
       break;
-      
-    case 'toggle-left':
-      state.ui.togglePanel('left');
+    case 'reset-view':
+      state.imageProcessor.fitToScreen();
+      state.imageProcessor.render();
       break;
   }
 }
 
-// Export for tools
-window.app = { state, handleAction };
+function handleAction(action) {
+  switch (action) {
+    case 'upload':
+      document.getElementById('file-input').click();
+      break;
+    case 'undo':
+      state.overlay.undo();
+      break;
+    case 'redo':
+      state.overlay.redo();
+      break;
+    case 'export':
+      exportPlan();
+      break;
+    case 'help':
+      showHelp();
+      break;
+  }
+}
+
+function exportPlan() {
+  const dataUrl = state.imageProcessor.exportPNG();
+  if (!dataUrl) {
+    showToast('No plan to export', 'error');
+    return;
+  }
+
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = `evacuation-plan-${Date.now()}.png`;
+  link.click();
+
+  showToast('Plan exported as PNG', 'success');
+}
+
+function showTab(tab, panel) {
+  // Hide all tabs in this panel
+  panel.querySelectorAll('.tab-content').forEach(el => {
+    el.classList.remove('active');
+  });
+
+  // Hide all tab buttons
+  panel.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+
+  // Show selected tab
+  const tabContent = panel.querySelector(`#tab-${tab}`);
+  if (tabContent) {
+    tabContent.classList.add('active');
+  }
+
+  // Highlight selected button
+  event.target.classList.add('active');
+}
+
+function showHelp() {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-box">
+      <div class="modal-head">
+        <h1>How to Use Evacua</h1>
+      </div>
+      <div class="modal-body">
+        <h3>Getting Started</h3>
+        <ol>
+          <li><strong>Upload a floor plan</strong> - Drag and drop an image, PDF, or video of your space</li>
+          <li><strong>Add safety markers</strong> - Click icon buttons to place emergency equipment</li>
+          <li><strong>Draw evacuation routes</strong> - Use arrow tools to draw escape paths</li>
+          <li><strong>Export your map</strong> - Download as PNG for printing or sharing</li>
+        </ol>
+
+        <h3>Tools</h3>
+        <ul>
+          <li><strong>🚪 Emergency Exit</strong> - Mark all exits</li>
+          <li><strong>→ Primary Route</strong> - Main evacuation path</li>
+          <li><strong>⇢ Alt Route</strong> - Secondary escape route</li>
+          <li><strong>📍 Assembly Point</strong> - Muster location</li>
+          <li><strong>🧯 Fire Extinguisher</strong> - Equipment location</li>
+          <li><strong>🩹 First Aid</strong> - Medical supplies</li>
+          <li><strong>⚠️ Hazard</strong> - Dangerous areas</li>
+          <li><strong>👤 Person</strong> - Occupant locations</li>
+        </ul>
+
+        <h3>Keyboard Shortcuts</h3>
+        <ul>
+          <li><strong>+/-</strong> - Zoom in/out</li>
+          <li><strong>0</strong> - Fit to screen</li>
+          <li><strong>Delete</strong> - Remove selected element</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="this.closest('.modal').remove()">Got it!</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('modal-host').appendChild(modal);
+}
+
+function showToast(message, type = 'info') {
+  const host = document.getElementById('toast-host');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  host.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 3000);
+}
 
 // Start when DOM is ready
 if (document.readyState === 'loading') {
