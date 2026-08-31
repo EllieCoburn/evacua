@@ -1,101 +1,183 @@
-// Professional emergency evacuation symbols following NFPA 170 and OSHA standards
-// Simple, bold, high-contrast symbols for clarity and instant recognition
+// Professional evacuation-map symbol library.
+// One set of SVG pictograms used everywhere: palette buttons, the map canvas,
+// and the exported legend — modeled on real NFPA 170 / ISO 7010 signage.
+
+const RED = '#c8102e';     // fire equipment / routes / you-are-here
+const GREEN = '#0a7d33';   // safe condition: exits, first aid, assembly
+const BLACK = '#1a1a1a';   // building features: stairs, elevator, restroom
+const YELLOW = '#ffd200';  // warning
+
+function svgWrap(inner) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${inner}</svg>`;
+}
 
 export const ICONS = {
+  'you-are-here': {
+    name: 'You Are Here',
+    size: 46,
+    svg: svgWrap(`
+      <path d="M50 6 C31 6 18 20 18 38 C18 62 50 94 50 94 C50 94 82 62 82 38 C82 20 69 6 50 6 Z"
+            fill="${RED}" stroke="#fff" stroke-width="4"/>
+      <circle cx="50" cy="38" r="13" fill="#fff"/>`)
+  },
   'emergency-exit': {
     name: 'Emergency Exit',
-    color: '#16a34a',  // ISO safety green
-    size: 50,
-    description: 'Emergency exit location',
-    standard: 'NFPA 170'
+    size: 48,
+    svg: svgWrap(`
+      <rect x="2" y="2" width="96" height="96" rx="10" fill="${GREEN}"/>
+      <rect x="68" y="16" width="16" height="68" fill="none" stroke="#fff" stroke-width="5"/>
+      <circle cx="36" cy="25" r="8" fill="#fff"/>
+      <path d="M28 41 L44 36 L53 47 L64 51" stroke="#fff" stroke-width="7" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M44 36 L43 58 L55 69 L53 84" stroke="#fff" stroke-width="7" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M43 58 L31 66 L25 82" stroke="#fff" stroke-width="7" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>`)
   },
-  'evacuation-route': {
-    name: 'Evacuation Route',
-    color: '#dc2626',  // Bold red for evacuation
-    size: 40,
-    description: 'Primary evacuation path (draw as route)',
+  'route-primary': {
+    name: 'Primary Route',
     isRoute: true,
-    standard: 'NFPA 170'
+    color: RED,
+    dash: [],
+    size: 40,
+    svg: svgWrap(`
+      <path d="M12 78 L54 78 L54 36 L70 36" stroke="${RED}" stroke-width="10" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M66 20 L92 36 L66 52 Z" fill="${RED}"/>`)
   },
-  'alt-evacuation-route': {
+  'route-alt': {
     name: 'Alternative Route',
-    color: '#fbbf24',  // Warning yellow
-    size: 40,
-    description: 'Alternative evacuation path (draw as route)',
     isRoute: true,
-    standard: 'NFPA 170'
-  },
-  'assembly-point': {
-    name: 'Assembly Point',
-    color: '#fbbf24',  // Yellow for gathering area
-    size: 50,
-    description: 'Designated assembly/muster point',
-    standard: 'NFPA 170'
+    color: RED,
+    dash: [14, 10],
+    size: 40,
+    svg: svgWrap(`
+      <path d="M12 78 L54 78 L54 36 L70 36" stroke="${RED}" stroke-width="10" fill="none"
+            stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="16 12"/>
+      <path d="M66 20 L92 36 L66 52 Z" fill="${RED}"/>`)
   },
   'fire-extinguisher': {
     name: 'Fire Extinguisher',
-    color: '#dc2626',  // Bold red
-    size: 45,
-    description: 'Fire extinguisher location',
-    standard: 'ISO 3864'
-  },
-  'first-aid': {
-    name: 'First Aid Kit',
-    color: '#16a34a',  // Safety green
-    size: 45,
-    description: 'First aid station or medical kit',
-    standard: 'ISO 3864'
+    size: 44,
+    svg: svgWrap(`
+      <circle cx="50" cy="50" r="47" fill="${RED}"/>
+      <rect x="42" y="38" width="20" height="40" rx="6" fill="#fff"/>
+      <rect x="46" y="27" width="12" height="9" rx="2" fill="#fff"/>
+      <path d="M48 28 C36 23 28 30 30 41" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <path d="M24 40 L36 42 L28 52 Z" fill="#fff"/>`)
   },
   'fire-alarm': {
     name: 'Fire Alarm',
-    color: '#dc2626',  // Bold red
-    size: 40,
-    description: 'Fire alarm pull station',
-    standard: 'NFPA 170'
+    size: 42,
+    svg: svgWrap(`
+      <circle cx="50" cy="50" r="47" fill="${RED}"/>
+      <text x="50" y="69" font-family="Arial, Helvetica, sans-serif" font-size="56"
+            font-weight="bold" fill="#fff" text-anchor="middle">A</text>`)
   },
-  'emergency-telephone': {
-    name: 'Emergency Telephone',
-    color: '#06b6d4',  // Information blue
-    size: 45,
-    description: 'Emergency telephone location',
-    standard: 'OSHA'
+  'first-aid': {
+    name: 'First Aid',
+    size: 44,
+    svg: svgWrap(`
+      <rect x="2" y="2" width="96" height="96" rx="10" fill="${GREEN}"/>
+      <rect x="41" y="20" width="18" height="60" fill="#fff"/>
+      <rect x="20" y="41" width="60" height="18" fill="#fff"/>`)
   },
-  'aed-defibrillator': {
-    name: 'AED/Defibrillator',
-    color: '#06b6d4',  // Information blue
-    size: 50,
-    description: 'Automated external defibrillator',
-    standard: 'OSHA'
+  'aed': {
+    name: 'AED',
+    size: 46,
+    svg: svgWrap(`
+      <rect x="2" y="2" width="96" height="96" rx="10" fill="${GREEN}"/>
+      <path d="M50 84 C18 60 23 28 41 28 C47 28 50 34 50 37 C50 34 53 28 59 28 C77 28 82 60 50 84 Z"
+            fill="#fff"/>
+      <polygon points="55,32 40,56 49,56 44,78 61,50 52,50" fill="${GREEN}"/>`)
+  },
+  'assembly-point': {
+    name: 'Assembly Point',
+    size: 48,
+    svg: svgWrap(`
+      <rect x="2" y="2" width="96" height="96" rx="10" fill="${GREEN}"/>
+      <polygon points="35,35 14,25 25,14" fill="#fff"/>
+      <polygon points="65,35 75,14 86,25" fill="#fff"/>
+      <polygon points="35,65 25,86 14,75" fill="#fff"/>
+      <polygon points="65,65 86,75 75,86" fill="#fff"/>
+      <circle cx="50" cy="41" r="8" fill="#fff"/>
+      <path d="M50 49 L50 62 M41 55 L59 55 M50 62 L42 76 M50 62 L58 76"
+            stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/>`)
+  },
+  'emergency-phone': {
+    name: 'Emergency Phone',
+    size: 42,
+    svg: svgWrap(`
+      <rect x="2" y="2" width="96" height="96" rx="10" fill="${GREEN}"/>
+      <path d="M26 34 C26 20 74 20 74 34 L69 46 C67 50 58 49 57 44 C52 46 48 46 43 44 C42 49 33 50 31 46 Z"
+            fill="#fff"/>
+      <text x="50" y="80" font-family="Arial, Helvetica, sans-serif" font-size="26"
+            font-weight="bold" fill="#fff" text-anchor="middle">SOS</text>`)
   },
   'stairwell': {
     name: 'Stairwell',
-    color: '#000000',  // Black outline
-    size: 45,
-    description: 'Staircase location',
-    standard: 'NFPA 170'
+    size: 42,
+    svg: svgWrap(`
+      <rect x="3" y="3" width="94" height="94" rx="8" fill="#fff" stroke="${BLACK}" stroke-width="5"/>
+      <path d="M16 80 L34 80 L34 64 L48 64 L48 48 L62 48 L62 32 L78 32 L78 20"
+            stroke="${BLACK}" stroke-width="6" fill="none"/>`)
   },
   'elevator': {
     name: 'Elevator',
-    color: '#000000',  // Black outline
-    size: 45,
-    description: 'Elevator location',
-    standard: 'NFPA 170'
+    size: 42,
+    svg: svgWrap(`
+      <rect x="3" y="3" width="94" height="94" rx="8" fill="#fff" stroke="${BLACK}" stroke-width="5"/>
+      <rect x="26" y="26" width="48" height="48" fill="none" stroke="${BLACK}" stroke-width="5"/>
+      <path d="M26 26 L74 74 M74 26 L26 74" stroke="${BLACK}" stroke-width="5"/>`)
   },
   'restroom': {
     name: 'Restroom',
-    color: '#000000',  // Black outline
-    size: 40,
-    description: 'Restroom location',
-    standard: 'NFPA 170'
+    size: 42,
+    svg: svgWrap(`
+      <rect x="3" y="3" width="94" height="94" rx="8" fill="#fff" stroke="${BLACK}" stroke-width="5"/>
+      <circle cx="33" cy="24" r="8" fill="${BLACK}"/>
+      <rect x="26" y="34" width="14" height="24" rx="4" fill="${BLACK}"/>
+      <rect x="27" y="58" width="5" height="20" fill="${BLACK}"/>
+      <rect x="34" y="58" width="5" height="20" fill="${BLACK}"/>
+      <circle cx="67" cy="24" r="8" fill="${BLACK}"/>
+      <polygon points="67,34 55,60 79,60" fill="${BLACK}"/>
+      <rect x="61" y="60" width="5" height="18" fill="${BLACK}"/>
+      <rect x="68" y="60" width="5" height="18" fill="${BLACK}"/>
+      <line x1="50" y1="16" x2="50" y2="84" stroke="${BLACK}" stroke-width="2"/>`)
   },
-  'you-are-here': {
-    name: 'You Are Here',
-    color: '#dc2626',  // Bold red
-    size: 45,
-    description: 'Current location marker',
-    standard: 'NFPA 170'
+  'hazard': {
+    name: 'Hazard',
+    size: 44,
+    svg: svgWrap(`
+      <path d="M50 8 L96 88 L4 88 Z" fill="${YELLOW}" stroke="${BLACK}" stroke-width="5"
+            stroke-linejoin="round"/>
+      <rect x="45" y="36" width="10" height="28" rx="4" fill="${BLACK}"/>
+      <circle cx="50" cy="76" r="6" fill="${BLACK}"/>`)
   }
 };
+
+// ---- Preloaded raster images of each SVG for canvas drawing ----
+const iconImages = {};
+
+export function preloadIcons() {
+  const loads = Object.entries(ICONS).map(([key, icon]) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve();
+      img.onerror = () => {
+        console.error(`Failed to rasterize icon: ${key}`);
+        resolve();
+      };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon.svg);
+      iconImages[key] = img;
+    });
+  });
+  return Promise.all(loads);
+}
+
+export function getIconImage(type) {
+  return iconImages[type] || null;
+}
 
 export class IconElement {
   constructor(type, x, y, id = null) {
@@ -117,67 +199,59 @@ export class IconElement {
     const icon = this.getIcon();
     if (!icon) return;
 
+    const s = icon.size * this.scale;
+    const img = getIconImage(this.type);
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate((this.rotation * Math.PI) / 180);
-    ctx.scale(this.scale, this.scale);
 
-    // Draw the appropriate symbol based on type
-    drawEmergencySymbol(ctx, this.type, icon);
-
-    // Draw selection indicator - simple circle outline
-    if (this.selected) {
-      ctx.strokeStyle = '#2563eb';
-      ctx.lineWidth = 3;
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, -s / 2, -s / 2, s, s);
+    } else {
+      // Fallback while the SVG rasterizes
+      ctx.fillStyle = '#999';
       ctx.beginPath();
-      ctx.arc(0, 0, icon.size / 2 + 12, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.arc(0, 0, s / 2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // Draw label if exists
+    if (this.selected) {
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(-s / 2 - 6, -s / 2 - 6, s + 12, s + 12);
+      ctx.setLineDash([]);
+    }
+
     if (this.label) {
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 2;
-      ctx.font = 'bold 10px Arial, sans-serif';
+      ctx.font = 'bold 11px Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      const textY = icon.size / 2 + 12;
-      ctx.strokeText(this.label, 0, textY);
-      ctx.fillText(this.label, 0, textY);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#fff';
+      ctx.fillStyle = '#1a1a1a';
+      ctx.strokeText(this.label, 0, s / 2 + 6);
+      ctx.fillText(this.label, 0, s / 2 + 6);
     }
 
     ctx.restore();
   }
 
   getBounds() {
-    const icon = this.getIcon();
-    const r = icon.size / 2 + 12;
-    return {
-      x: this.x - r,
-      y: this.y - r,
-      width: r * 2,
-      height: r * 2
-    };
+    const s = this.getIcon().size * this.scale;
+    return { x: this.x - s / 2, y: this.y - s / 2, width: s, height: s };
   }
 
   contains(x, y) {
-    const icon = this.getIcon();
-    const dx = x - this.x;
-    const dy = y - this.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    return dist < (icon.size / 2 + 12);
+    const s = this.getIcon().size * this.scale;
+    return Math.abs(x - this.x) < s / 2 + 8 && Math.abs(y - this.y) < s / 2 + 8;
   }
 
   toJSON() {
     return {
-      id: this.id,
-      type: this.type,
-      x: this.x,
-      y: this.y,
-      rotation: this.rotation,
-      scale: this.scale,
-      label: this.label
+      id: this.id, type: this.type, x: this.x, y: this.y,
+      rotation: this.rotation, scale: this.scale, label: this.label
     };
   }
 
@@ -193,7 +267,7 @@ export class IconElement {
 export class RouteElement {
   constructor(type, points = [], id = null) {
     this.id = id || Math.random().toString(36).substr(2, 9);
-    this.type = type;
+    this.type = type; // 'route-primary' or 'route-alt'
     this.points = points;
     this.selected = false;
   }
@@ -204,70 +278,62 @@ export class RouteElement {
     const icon = ICONS[this.type];
     if (!icon) return;
 
-    // Draw thick, bold route line
-    ctx.strokeStyle = icon.color;
-    ctx.lineWidth = 5;
+    ctx.save();
+
+    // White casing underneath so the route reads over any floor plan
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 9;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
-    ctx.beginPath();
-    ctx.moveTo(this.points[0].x, this.points[0].y);
-
-    for (let i = 1; i < this.points.length; i++) {
-      ctx.lineTo(this.points[i].x, this.points[i].y);
-    }
-
+    this.tracePath(ctx);
     ctx.stroke();
 
-    // Draw directional arrows at regular intervals
-    const spacing = 80;
+    // Route line
+    ctx.strokeStyle = icon.color;
+    ctx.lineWidth = 5;
+    ctx.setLineDash(icon.dash || []);
+    this.tracePath(ctx);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-    for (let i = 0; i < this.points.length - 1; i++) {
-      const p1 = this.points[i];
-      const p2 = this.points[i + 1];
-      const segmentDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    // Single bold arrowhead at the end of the route (toward the exit),
+    // like real evacuation plans
+    const n = this.points.length;
+    const p1 = this.points[n - 2];
+    const p2 = this.points[n - 1];
+    drawArrowhead(ctx, p1, p2, icon.color);
 
-      let segmentProgress = 0;
-      while (segmentProgress < segmentDist) {
-        const ratio = segmentProgress / segmentDist;
-        const arrowX = p1.x + (p2.x - p1.x) * ratio;
-        const arrowY = p1.y + (p2.y - p1.y) * ratio;
-        drawBoldArrow(ctx, p1.x, p1.y, p2.x, p2.y, arrowX, arrowY, icon.color);
-        segmentProgress += spacing;
-      }
-    }
-
-    // Draw selection highlight
     if (this.selected) {
       ctx.strokeStyle = '#2563eb';
-      ctx.lineWidth = 7;
-      ctx.globalAlpha = 0.4;
-      ctx.beginPath();
-      ctx.moveTo(this.points[0].x, this.points[0].y);
-      for (let i = 1; i < this.points.length; i++) {
-        ctx.lineTo(this.points[i].x, this.points[i].y);
-      }
+      ctx.lineWidth = 11;
+      ctx.globalAlpha = 0.3;
+      this.tracePath(ctx);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
+
+    ctx.restore();
   }
 
-  contains(x, y, threshold = 15) {
+  tracePath(ctx) {
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      ctx.lineTo(this.points[i].x, this.points[i].y);
+    }
+  }
+
+  contains(x, y, threshold = 12) {
     for (let i = 0; i < this.points.length - 1; i++) {
       const p1 = this.points[i];
       const p2 = this.points[i + 1];
-      const dist = distanceToLine(x, y, p1.x, p1.y, p2.x, p2.y);
-      if (dist < threshold) return true;
+      if (distanceToLine(x, y, p1.x, p1.y, p2.x, p2.y) < threshold) return true;
     }
     return false;
   }
 
   toJSON() {
-    return {
-      id: this.id,
-      type: this.type,
-      points: this.points
-    };
+    return { id: this.id, type: this.type, points: this.points };
   }
 
   static fromJSON(data) {
@@ -275,427 +341,24 @@ export class RouteElement {
   }
 }
 
-// Symbol drawing functions - professional NFPA 170 style
-function drawEmergencySymbol(ctx, type, icon) {
-  const size = icon.size;
-  const color = icon.color;
+function drawArrowhead(ctx, from, to, color) {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  const len = 18;
 
-  switch (type) {
-    case 'emergency-exit':
-      drawExitSign(ctx, color, size);
-      break;
-    case 'assembly-point':
-      drawAssemblyPoint(ctx, color, size);
-      break;
-    case 'fire-extinguisher':
-      drawFireExtinguisher(ctx, color, size);
-      break;
-    case 'first-aid':
-      drawFirstAidSign(ctx, color, size);
-      break;
-    case 'fire-alarm':
-      drawFireAlarmSign(ctx, color, size);
-      break;
-    case 'emergency-telephone':
-      drawTelephoneSign(ctx, color, size);
-      break;
-    case 'aed-defibrillator':
-      drawAEDSign(ctx, color, size);
-      break;
-    case 'stairwell':
-      drawStairwellSign(ctx, color, size);
-      break;
-    case 'elevator':
-      drawElevatorSign(ctx, color, size);
-      break;
-    case 'restroom':
-      drawRestroomSign(ctx, color, size);
-      break;
-    case 'you-are-here':
-      drawYouAreHereSign(ctx, color, size);
-      break;
-    default:
-      drawPlaceholder(ctx, color, size);
-  }
-}
-
-function drawExitSign(ctx, color, size) {
-  const r = size / 2;
-
-  // Green background rectangle
-  ctx.fillStyle = color;
-  ctx.fillRect(-r * 0.8, -r * 0.5, size * 0.8, size * 0.5);
-
-  // White border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-r * 0.8, -r * 0.5, size * 0.8, size * 0.5);
-
-  // White "EXIT" text
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `bold ${size * 0.35}px Arial`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('EXIT', -r * 0.3, -r * 0.15);
-
-  // White running figure
-  ctx.fillStyle = '#ffffff';
-  // Head
-  ctx.beginPath();
-  ctx.arc(r * 0.2, -r * 0.2, r * 0.12, 0, Math.PI * 2);
-  ctx.fill();
-  // Body
-  ctx.fillRect(r * 0.15, -r * 0.05, r * 0.1, r * 0.2);
-  // Legs
-  ctx.fillRect(r * 0.16, r * 0.15, r * 0.04, r * 0.15);
-  ctx.fillRect(r * 0.22, r * 0.15, r * 0.04, r * 0.15);
-}
-
-function drawAssemblyPoint(ctx, color, size) {
-  const r = size / 2;
-
-  // Yellow triangle with bold border
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(0, -r * 0.85);
-  ctx.lineTo(r * 0.85, r * 0.7);
-  ctx.lineTo(-r * 0.85, r * 0.7);
-  ctx.closePath();
-  ctx.fill();
-
-  // Bold black border
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // Simple figures inside (stick figures)
-  ctx.fillStyle = '#000000';
-
-  // Left figure
-  ctx.beginPath();
-  ctx.arc(-r * 0.35, -r * 0.1, r * 0.15, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillRect(-r * 0.4, r * 0.05, r * 0.1, r * 0.35);
-
-  // Right figure
-  ctx.beginPath();
-  ctx.arc(r * 0.35, -r * 0.1, r * 0.15, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillRect(r * 0.3, r * 0.05, r * 0.1, r * 0.35);
-}
-
-function drawFireExtinguisher(ctx, color, size) {
-  const r = size / 2;
-
-  // Red square background
-  ctx.fillStyle = color;
-  ctx.fillRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  // White border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  // White fire extinguisher outline
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.fillStyle = 'transparent';
-
-  // Tank body
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(-r * 0.25, -r * 0.3, r * 0.5, r * 0.45);
-
-  // Nozzle
-  ctx.beginPath();
-  ctx.moveTo(-r * 0.1, -r * 0.3);
-  ctx.lineTo(r * 0.1, -r * 0.4);
-  ctx.lineTo(r * 0.2, -r * 0.2);
-  ctx.lineTo(-r * 0.15, -r * 0.2);
-  ctx.closePath();
-  ctx.fill();
-
-  // Handle
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-r * 0.15, -r * 0.3);
-  ctx.quadraticCurveTo(-r * 0.4, -r * 0.5, r * 0.15, -r * 0.3);
-  ctx.stroke();
-}
-
-function drawFirstAidSign(ctx, color, size) {
-  const r = size / 2;
-
-  // Green square
-  ctx.fillStyle = color;
-  ctx.fillRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  // White border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  // White cross
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(-r * 0.12, -r * 0.4, r * 0.24, r * 0.8);
-  ctx.fillRect(-r * 0.4, -r * 0.12, r * 0.8, r * 0.24);
-}
-
-function drawFireAlarmSign(ctx, color, size) {
-  const r = size / 2;
-
-  // Red circle background
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.75, 0, Math.PI * 2);
-  ctx.fill();
-
-  // White border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // White bell symbol inside
-  ctx.fillStyle = '#ffffff';
-  // Bell dome
-  ctx.beginPath();
-  ctx.ellipse(0, -r * 0.15, r * 0.3, r * 0.25, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Bell handle
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(0, -r * 0.45, r * 0.15, Math.PI * 0.4, Math.PI * 1.6);
-  ctx.stroke();
-
-  // Clapper
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(-r * 0.05, r * 0.05, r * 0.1, r * 0.25);
-}
-
-function drawTelephoneSign(ctx, color, size) {
-  const r = size / 2;
-
-  // Blue circle background
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.75, 0, Math.PI * 2);
-  ctx.fill();
-
-  // White border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // White telephone symbol
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-
-  // Phone handset
-  ctx.beginPath();
-  ctx.moveTo(-r * 0.25, -r * 0.15);
-  ctx.lineTo(r * 0.25, -r * 0.15);
-  ctx.arc(r * 0.25, -r * 0.05, r * 0.1, Math.PI, 0);
-  ctx.lineTo(r * 0.25, r * 0.05);
-  ctx.lineTo(-r * 0.25, r * 0.05);
-  ctx.arc(-r * 0.25, -r * 0.05, r * 0.1, 0, Math.PI);
-  ctx.closePath();
-  ctx.fill();
-
-  // Phone receiver buttons
-  ctx.beginPath();
-  ctx.arc(-r * 0.1, r * 0.2, r * 0.08, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(r * 0.1, r * 0.2, r * 0.08, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawAEDSign(ctx, color, size) {
-  const r = size / 2;
-
-  // Blue background
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.8, 0, Math.PI * 2);
-  ctx.fill();
-
-  // White border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // White AED device
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(-r * 0.35, -r * 0.35, r * 0.7, r * 0.5);
-
-  // Defibrillator pads (red)
-  ctx.fillStyle = '#dc2626';
-  ctx.fillRect(-r * 0.25, -r * 0.2, r * 0.2, r * 0.2);
-  ctx.fillRect(r * 0.05, -r * 0.2, r * 0.2, r * 0.2);
-
-  // "AED" text
-  ctx.fillStyle = '#06b6d4';
-  ctx.font = `bold ${r * 0.25}px Arial`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('AED', 0, r * 0.1);
-}
-
-function drawStairwellSign(ctx, color, size) {
-  const r = size / 2;
-
-  // White rectangle with black border
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  // Simple staircase symbol
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.fillStyle = color;
-
-  // Draw staircase steps
-  const stepSize = r * 0.2;
-  for (let i = 0; i < 3; i++) {
-    const x = -r * 0.4 + i * stepSize;
-    const y = -r * 0.2 + i * stepSize;
-    ctx.strokeRect(x, y, stepSize, stepSize);
-  }
-}
-
-function drawElevatorSign(ctx, color, size) {
-  const r = size / 2;
-
-  // White rectangle with black border
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  // Elevator symbol (box with arrows)
-  ctx.fillStyle = color;
-  ctx.fillRect(-r * 0.25, -r * 0.2, r * 0.5, r * 0.4);
-
-  // Up arrow
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.moveTo(0, -r * 0.15);
-  ctx.lineTo(-r * 0.1, r * 0.05);
-  ctx.lineTo(r * 0.1, r * 0.05);
-  ctx.closePath();
-  ctx.fill();
-
-  // Down arrow
-  ctx.beginPath();
-  ctx.moveTo(0, r * 0.15);
-  ctx.lineTo(-r * 0.1, -r * 0.05);
-  ctx.lineTo(r * 0.1, -r * 0.05);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawRestroomSign(ctx, color, size) {
-  const r = size / 2;
-
-  // White rectangle with black border
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-r * 0.65, -r * 0.65, size * 0.65, size * 0.65);
-
-  // Male figure (left)
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(-r * 0.25, -r * 0.2, r * 0.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillRect(-r * 0.3, -r * 0.05, r * 0.1, r * 0.3);
-  ctx.fillRect(-r * 0.35, 0, r * 0.2, r * 0.15);
-
-  // Female figure (right)
-  ctx.beginPath();
-  ctx.arc(r * 0.25, -r * 0.2, r * 0.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(r * 0.25, -r * 0.05, r * 0.15, 0, Math.PI);
-  ctx.fill();
-  ctx.fillRect(r * 0.2, r * 0.05, r * 0.1, r * 0.3);
-}
-
-function drawYouAreHereSign(ctx, color, size) {
-  const r = size / 2;
-
-  // Red circle background
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.75, 0, Math.PI * 2);
-  ctx.fill();
-
-  // White border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // White center dot
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.25, 0, Math.PI * 2);
-  ctx.fill();
-
-  // You are here text indicator
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `bold ${r * 0.2}px Arial`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('✓', 0, r * 0.05);
-}
-
-function drawPlaceholder(ctx, color, size) {
-  const r = size / 2;
-
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.7, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `bold ${size * 0.5}px Arial`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('?', 0, 0);
-}
-
-function drawBoldArrow(ctx, p1x, p1y, p2x, p2y, arrowX, arrowY, color) {
-  const headlen = 16;
-  const angle = Math.atan2(p2y - p1y, p2x - p1x);
-
-  ctx.fillStyle = color;
   ctx.save();
-  ctx.translate(arrowX, arrowY);
+  ctx.translate(to.x, to.y);
   ctx.rotate(angle);
-
-  // Bold arrowhead
+  ctx.fillStyle = color;
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(-headlen, -headlen * 0.7);
-  ctx.lineTo(-headlen * 0.5, 0);
-  ctx.lineTo(-headlen, headlen * 0.7);
+  ctx.moveTo(len * 0.6, 0);
+  ctx.lineTo(-len * 0.5, -len * 0.55);
+  ctx.lineTo(-len * 0.2, 0);
+  ctx.lineTo(-len * 0.5, len * 0.55);
   ctx.closePath();
   ctx.fill();
-
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -712,17 +375,9 @@ function distanceToLine(px, py, x1, y1, x2, y2) {
   if (lenSq !== 0) param = dot / lenSq;
 
   let xx, yy;
-
-  if (param < 0) {
-    xx = x1;
-    yy = y1;
-  } else if (param > 1) {
-    xx = x2;
-    yy = y2;
-  } else {
-    xx = x1 + param * C;
-    yy = y1 + param * D;
-  }
+  if (param < 0) { xx = x1; yy = y1; }
+  else if (param > 1) { xx = x2; yy = y2; }
+  else { xx = x1 + param * C; yy = y1 + param * D; }
 
   const dx = px - xx;
   const dy = py - yy;

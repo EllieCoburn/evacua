@@ -29,7 +29,13 @@ export class Overlay {
     this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
-    this.canvas.addEventListener('click', (e) => this.onClick(e));
+    this.canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.drawingRoute) {
+        this.drawingRoute = null;
+        this.render();
+      }
+    });
   }
 
   getMousePos(e) {
@@ -66,10 +72,13 @@ export class Overlay {
       };
     } else if (this.currentTool === 'draw-arrow') {
       if (!this.drawingRoute) {
-        this.drawingRoute = new RouteElement(this.currentIconType, [pos]);
+        // Start route: first fixed point + a preview point that follows the mouse
+        this.drawingRoute = new RouteElement(this.currentIconType, [pos, { x: pos.x, y: pos.y }]);
       } else {
-        this.drawingRoute.points.push(pos);
+        // Commit the preview point and start a new preview segment
+        this.drawingRoute.points.push({ x: pos.x, y: pos.y });
       }
+      this.render();
     } else if (this.currentTool === 'add-icon') {
       this.addIcon(this.currentIconType, pos.x, pos.y);
     }
@@ -109,15 +118,27 @@ export class Overlay {
     }
   }
 
-  onClick(e) {
-    const pos = this.getMousePos(e);
-
+  onDoubleClick(e) {
     if (this.currentTool === 'draw-arrow' && this.drawingRoute) {
-      if (e.button === 2) {
-        this.routes.push(this.drawingRoute);
-        this.drawingRoute = null;
-        this.render();
+      // Drop the live preview point, then any duplicates left by the
+      // double-click's own mousedown events
+      const pts = this.drawingRoute.points;
+      pts.pop();
+      while (pts.length > 1) {
+        const a = pts[pts.length - 1];
+        const b = pts[pts.length - 2];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < 4) {
+          pts.pop();
+        } else {
+          break;
+        }
       }
+
+      if (pts.length >= 2) {
+        this.routes.push(this.drawingRoute);
+      }
+      this.drawingRoute = null;
+      this.render();
     }
   }
 

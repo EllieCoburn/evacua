@@ -1,7 +1,7 @@
 import { ImageProcessor } from './image-processor.js';
 import { Overlay } from './overlay.js';
 import { WallDetector } from './wall-detector.js';
-import { ICONS } from './icon-library.js';
+import { ICONS, preloadIcons, getIconImage } from './icon-library.js';
 
 const state = {
   imageProcessor: null,
@@ -15,9 +15,13 @@ function init() {
   setupCanvases();
   setupEventListeners();
   setupToolButtons();
-  setupIconButtons();
   setupDetectionControls();
-  console.log('Evacua initialized');
+
+  preloadIcons().then(() => {
+    buildIconPalette();
+    state.overlay.render();
+    console.log('Evacua initialized');
+  });
 }
 
 function setupCanvases() {
@@ -209,21 +213,44 @@ function setupToolButtons() {
   });
 }
 
-function setupIconButtons() {
-  document.querySelectorAll('[data-icon]').forEach(btn => {
+function buildIconPalette() {
+  const palette = document.getElementById('icon-palette');
+  if (!palette) return;
+
+  palette.innerHTML = '';
+
+  for (const [key, icon] of Object.entries(ICONS)) {
+    const btn = document.createElement('button');
+    btn.className = 'icon-btn';
+    btn.dataset.icon = key;
+    btn.title = icon.name;
+
+    const preview = document.createElement('span');
+    preview.className = 'icon-preview';
+    preview.innerHTML = icon.svg;
+
+    const label = document.createElement('span');
+    label.textContent = icon.name;
+
+    btn.appendChild(preview);
+    btn.appendChild(label);
+
     btn.addEventListener('click', () => {
-      const iconType = btn.dataset.icon;
-      
-      if (ICONS[iconType]?.isRoute) {
-        state.overlay.currentIconType = iconType;
+      document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      if (icon.isRoute) {
+        state.overlay.currentIconType = key;
         state.overlay.setTool('draw-arrow');
-        showToast(`Click canvas to start ${ICONS[iconType].name}`, 'info');
+        showToast(`Click points along the ${icon.name.toLowerCase()}, double-click to finish`, 'info');
       } else {
-        state.overlay.setIconTool(iconType);
-        showToast(`Click to place ${ICONS[iconType].name}`, 'info');
+        state.overlay.setIconTool(key);
+        showToast(`Click the map to place: ${icon.name}`, 'info');
       }
     });
-  });
+
+    palette.appendChild(btn);
+  }
 }
 
 async function loadImage(file) {
@@ -334,18 +361,106 @@ function handleAction(action) {
 }
 
 function exportPlan() {
-  const dataUrl = state.imageProcessor.exportPNG();
-  if (!dataUrl) {
+  if (!state.imageProcessor.currentImage) {
     showToast('No plan to export', 'error');
     return;
   }
 
+  const imageCanvas = document.getElementById('image-canvas');
+  const overlayCanvas = document.getElementById('overlay-canvas');
+
+  const out = document.createElement('canvas');
+  out.width = imageCanvas.width;
+  out.height = imageCanvas.height;
+  const ctx = out.getContext('2d');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(imageCanvas, 0, 0);
+  ctx.drawImage(overlayCanvas, 0, 0);
+
+  drawLegend(ctx, out.width, out.height);
+
   const link = document.createElement('a');
-  link.href = dataUrl;
+  link.href = out.toDataURL('image/png');
   link.download = `evacuation-plan-${Date.now()}.png`;
   link.click();
 
-  showToast('Plan exported as PNG', 'success');
+  showToast('Plan exported as PNG with legend', 'success');
+}
+
+// Auto-generated legend of the symbols actually used on this plan,
+// like the legend block on professional evacuation signage
+function drawLegend(ctx, canvasW, canvasH) {
+  const used = new Map();
+  for (const ic of state.overlay.icons) {
+    if (ICONS[ic.type]) used.set(ic.type, ICONS[ic.type]);
+  }
+  for (const rt of state.overlay.routes) {
+    if (ICONS[rt.type]) used.set(rt.type, ICONS[rt.type]);
+  }
+  if (used.size === 0) return;
+
+  const rowH = 28;
+  const pad = 12;
+  const titleH = 24;
+  const boxW = 200;
+  const boxH = titleH + used.size * rowH + pad;
+  const x = 16;
+  const y = canvasH - boxH - 16;
+
+  ctx.save();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 2;
+  ctx.fillRect(x, y, boxW, boxH);
+  ctx.strokeRect(x, y, boxW, boxH);
+
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = 'bold 13px Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('LEGEND', x + pad, y + titleH / 2 + 4);
+  ctx.beginPath();
+  ctx.moveTo(x + pad, y + titleH);
+  ctx.lineTo(x + boxW - pad, y + titleH);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  let rowY = y + titleH + rowH / 2;
+  for (const [type, icon] of used) {
+    if (icon.isRoute) {
+      // Line sample with arrowhead
+      ctx.strokeStyle = icon.color;
+      ctx.lineWidth = 3;
+      ctx.setLineDash(icon.dash && icon.dash.length ? [7, 5] : []);
+      ctx.beginPath();
+      ctx.moveTo(x + pad, rowY);
+      ctx.lineTo(x + pad + 22, rowY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = icon.color;
+      ctx.beginPath();
+      ctx.moveTo(x + pad + 30, rowY);
+      ctx.lineTo(x + pad + 21, rowY - 5);
+      ctx.lineTo(x + pad + 21, rowY + 5);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      const img = getIconImage(type);
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, x + pad + 2, rowY - 11, 22, 22);
+      }
+    }
+
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = '12px Arial, sans-serif';
+    ctx.fillText(icon.name.toUpperCase(), x + pad + 38, rowY + 1);
+    rowY += rowH;
+  }
+
+  ctx.restore();
 }
 
 function showTab(tab, panel) {
