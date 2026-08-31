@@ -9,56 +9,90 @@ export class WallDetector {
   }
 
   detect() {
-    if (!this.imageProcessor.currentImage) return null;
+    const img = this.imageProcessor.currentImage;
+    if (!img) return null;
+
+    // Work at a capped resolution so re-detection stays fast
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    const scale = Math.min(1, 1400 / Math.max(srcW, srcH));
+    const w = Math.max(1, Math.round(srcW * scale));
+    const h = Math.max(1, Math.round(srcH * scale));
 
     const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = this.imageProcessor.currentImage;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
 
-    canvas.width = img.width;
-    canvas.height = img.height;
+    const imageData = ctx.getImageData(0, 0, w, h);
 
-    // Draw image
-    ctx.drawImage(img, 0, 0);
-
-    // Get image data
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-
-    // Convert to grayscale
-    const gray = this.toGrayscale(data, canvas.width, canvas.height);
-
-    // Apply blur to reduce noise
-    const blurred = this.gaussianBlur(gray, canvas.width, canvas.height, this.blurRadius);
-
-    // Detect edges using Sobel operator
-    const edges = this.sobelEdgeDetection(blurred, canvas.width, canvas.height);
-
-    // Threshold to binary
+    const gray = this.toGrayscale(imageData.data, w, h);
+    const blurred = this.gaussianBlur(gray, w, h, this.blurRadius);
+    const edges = this.sobelEdgeDetection(blurred, w, h);
     const thresholded = this.threshold(edges, this.sensitivity);
 
-    // Create visualization canvas
-    const wallCanvas = document.createElement('canvas');
-    wallCanvas.width = canvas.width;
-    wallCanvas.height = canvas.height;
-    const wallCtx = wallCanvas.getContext('2d');
+    // Keep the binary mask for extraction
+    this.binary = thresholded;
+    this.binWidth = w;
+    this.binHeight = h;
 
-    const wallImageData = wallCtx.createImageData(canvas.width, canvas.height);
+    // Visualization: detected walls as semi-transparent red over the plan,
+    // everything else fully transparent
+    const wallCanvas = document.createElement('canvas');
+    wallCanvas.width = w;
+    wallCanvas.height = h;
+    const wallCtx = wallCanvas.getContext('2d');
+    const wallImageData = wallCtx.createImageData(w, h);
     const wallData = wallImageData.data;
 
-    // Convert thresholded data to RGBA
     for (let i = 0; i < thresholded.length; i++) {
-      const value = thresholded[i];
-      wallData[i * 4] = value;     // R
-      wallData[i * 4 + 1] = value; // G
-      wallData[i * 4 + 2] = value; // B
-      wallData[i * 4 + 3] = 255;   // A
+      if (thresholded[i] > 128) {
+        wallData[i * 4] = 220;      // R
+        wallData[i * 4 + 1] = 38;   // G
+        wallData[i * 4 + 2] = 38;   // B
+        wallData[i * 4 + 3] = 190;  // A — translucent so the plan shows through
+      }
+      // else: leave fully transparent
     }
 
     wallCtx.putImageData(wallImageData, 0, 0);
 
     this.detectedWalls = wallCanvas;
     return wallCanvas;
+  }
+
+  // Turn the detected walls into a clean black-on-white plan canvas
+  toPlanCanvas() {
+    if (!this.binary) return null;
+
+    const w = this.binWidth;
+    const h = this.binHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const out = ctx.createImageData(w, h);
+    const od = out.data;
+
+    for (let i = 0; i < this.binary.length; i++) {
+      const p = i * 4;
+      if (this.binary[i] > 128) {
+        od[p] = 26; od[p + 1] = 26; od[p + 2] = 26; od[p + 3] = 255;
+      } else {
+        od[p] = 255; od[p + 1] = 255; od[p + 2] = 255; od[p + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(out, 0, 0);
+    return canvas;
+  }
+
+  clear() {
+    this.detectedWalls = null;
+    this.binary = null;
   }
 
   toGrayscale(data, width, height) {
@@ -173,74 +207,4 @@ export class WallDetector {
     this.blurRadius = Math.max(1, Math.min(5, Math.round(value)));
   }
 
-  renderDetection(canvas) {
-    if (!this.detectedWalls) return;
-
-    const ctx = canvas.getContext('2d');
-    ctx.globalAlpha = 0.6;
-    ctx.drawImage(this.detectedWalls, 0, 0);
-    ctx.globalAlpha = 1;
-  }
-
-  extractWallLines() {
-    if (!this.detectedWalls) return [];
-
-    // Simple line extraction - find connected components of edges
-    const canvas = this.detectedWalls;
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-
-    const lines = [];
-    const visited = new Set();
-
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 128 && !visited.has(i)) {
-        // Start of an edge
-        const line = this.traceEdge(data, canvas.width, canvas.height, i, visited);
-        if (line.length > 20) { // Filter out noise
-          lines.push(line);
-        }
-      }
-    }
-
-    return lines;
-  }
-
-  traceEdge(data, width, height, startIdx, visited) {
-    const points = [];
-    const stack = [startIdx];
-    const pixelWidth = width * 4;
-
-    while (stack.length > 0) {
-      const idx = stack.pop();
-      
-      if (visited.has(idx)) continue;
-      visited.add(idx);
-
-      if (data[idx] > 128) {
-        const pixelIdx = idx / 4;
-        const x = pixelIdx % width;
-        const y = Math.floor(pixelIdx / width);
-        points.push({ x, y });
-
-        // Check neighbors
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-            
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-              const nIdx = (ny * width + nx) * 4;
-              if (!visited.has(nIdx)) {
-                stack.push(nIdx);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return points;
-  }
 }

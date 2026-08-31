@@ -8,6 +8,7 @@ export class ImageProcessor {
     this.overlayCtx = overlayCanvas.getContext('2d');
     
     this.currentImage = null;
+    this.detectionOverlay = null; // red wall-highlight canvas, drawn over the image
     this.zoom = 1;
     this.panX = 0;
     this.panY = 0;
@@ -172,6 +173,18 @@ export class ImageProcessor {
       scaledWidth,
       scaledHeight
     );
+
+    // Wall-detection highlight, drawn with the same transform as the image
+    // so it stays aligned at any zoom/pan
+    if (this.detectionOverlay) {
+      this.imageCtx.drawImage(
+        this.detectionOverlay,
+        this.panX,
+        this.panY,
+        scaledWidth,
+        scaledHeight
+      );
+    }
 
     // Draw grid if needed
     this.drawGrid();

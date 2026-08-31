@@ -58,75 +58,91 @@ function setupDetectionControls() {
   const extractBtn = document.getElementById('extract-walls-btn');
   const clearBtn = document.getElementById('clear-detection-btn');
 
+  const runDetection = () => {
+    const detectionCanvas = state.wallDetector.detect();
+    if (!detectionCanvas) {
+      showToast('Upload a floor plan first', 'error');
+      return false;
+    }
+    state.imageProcessor.detectionOverlay = detectionCanvas;
+    state.imageProcessor.render();
+    return true;
+  };
+
   detectBtn.addEventListener('click', () => {
-    showToast('Detecting walls... this may take a moment', 'info');
-    
+    if (!state.imageProcessor.currentImage) {
+      showToast('Upload a floor plan first', 'error');
+      return;
+    }
+
+    showToast('Detecting walls...', 'info');
+
     setTimeout(() => {
-      const detectionCanvas = state.wallDetector.detect();
-      if (detectionCanvas) {
+      if (runDetection()) {
         controls.style.display = 'block';
-        showToast('Walls detected! Adjust settings to refine', 'success');
+        showDetectionCheckbox.checked = true;
         state.showDetection = true;
-        renderWithDetection();
-      } else {
-        showToast('No image uploaded yet', 'error');
+        showToast('Detected walls are highlighted in red — tune the sliders, then apply', 'success');
       }
-    }, 100);
+    }, 30);
   });
 
+  // Update readouts live while dragging; re-run detection on release
   sensitivitySlider.addEventListener('input', (e) => {
-    state.wallDetector.setSensitivity(parseFloat(e.target.value));
-    document.getElementById('sensitivity-value').textContent = 
+    document.getElementById('sensitivity-value').textContent =
       Math.round(parseFloat(e.target.value) * 100) + '%';
-    
-    state.wallDetector.detect();
-    if (state.showDetection) {
-      renderWithDetection();
-    }
+  });
+  sensitivitySlider.addEventListener('change', (e) => {
+    state.wallDetector.setSensitivity(parseFloat(e.target.value));
+    if (state.showDetection) runDetection();
   });
 
   blurSlider.addEventListener('input', (e) => {
-    state.wallDetector.setBlurRadius(parseInt(e.target.value));
     document.getElementById('blur-value').textContent = e.target.value + 'px';
-    
-    state.wallDetector.detect();
-    if (state.showDetection) {
-      renderWithDetection();
-    }
+  });
+  blurSlider.addEventListener('change', (e) => {
+    state.wallDetector.setBlurRadius(parseInt(e.target.value));
+    if (state.showDetection) runDetection();
   });
 
   showDetectionCheckbox.addEventListener('change', (e) => {
     state.showDetection = e.target.checked;
-    renderWithDetection();
+    state.imageProcessor.detectionOverlay =
+      state.showDetection ? state.wallDetector.detectedWalls : null;
+    state.imageProcessor.render();
   });
 
+  // Replace the base image with a clean plan built from the detected walls
   extractBtn.addEventListener('click', () => {
-    const lines = state.wallDetector.extractWallLines();
-    showToast(`Extracted ${lines.length} wall segments. Refine manually if needed.`, 'info');
-    // TODO: Convert detected lines to editable wall elements
+    const planCanvas = state.wallDetector.toPlanCanvas();
+    if (!planCanvas) {
+      showToast('Run Detect Walls first', 'error');
+      return;
+    }
+
+    state.cleanPlan = planCanvas;
+    state.view = 'clean';
+    state.imageProcessor.currentImage = planCanvas;
+    state.imageProcessor.detectionOverlay = null;
+    state.showDetection = false;
+    showDetectionCheckbox.checked = false;
+    state.imageProcessor.fitToScreen();
+    state.imageProcessor.render();
+    state.overlay.render();
+    updateViewToggle();
+    showToast('Detected walls applied as your base plan — press "Original" any time to compare', 'success');
   });
 
   clearBtn.addEventListener('click', () => {
-    state.wallDetector.detectedWalls = null;
+    state.wallDetector.clear();
     state.showDetection = false;
     showDetectionCheckbox.checked = false;
     controls.style.display = 'none';
+    state.imageProcessor.detectionOverlay = null;
     state.imageProcessor.render();
     state.overlay.render();
     showToast('Detection cleared', 'info');
   });
-}
-
-function renderWithDetection() {
-  state.imageProcessor.render();
-  
-  if (state.showDetection && state.wallDetector.detectedWalls) {
-    const overlayCanvas = document.getElementById('overlay-canvas');
-    const ctx = overlayCanvas.getContext('2d');
-    state.wallDetector.renderDetection(overlayCanvas);
-  }
-  
-  state.overlay.render();
 }
 
 function setupEventListeners() {
