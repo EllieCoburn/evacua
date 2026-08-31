@@ -5,7 +5,9 @@
 // Pipeline: downscale → grayscale → polarity check → adaptive threshold
 // (integral-image mean, robust to shadows/uneven lighting) → despeckle.
 
-export function cleanFloorPlan(source, opts = {}) {
+// Shared first stage: compute a binary ink mask from any source.
+// Returns { mask, w, h, scale } where scale maps source coords -> mask coords.
+export function computeInkMask(source, opts = {}) {
   const maxDim = opts.maxDim || 2000;
   const radius = opts.windowRadius || 14;  // adaptive window half-size in px
   const offset = opts.offset || 12;        // how much darker than local mean counts as ink
@@ -100,6 +102,13 @@ export function cleanFloorPlan(source, opts = {}) {
     }
   }
 
+  return { mask: cleaned, w, h, scale };
+}
+
+export function cleanFloorPlan(source, opts = {}) {
+  const { mask, w, h } = computeInkMask(source, opts);
+  const n = w * h;
+
   // Render: dark charcoal lines on white
   const out = document.createElement('canvas');
   out.width = w;
@@ -109,7 +118,7 @@ export function cleanFloorPlan(source, opts = {}) {
   const od = outData.data;
   for (let i = 0; i < n; i++) {
     const p = i * 4;
-    if (cleaned[i]) {
+    if (mask[i]) {
       od[p] = 26; od[p + 1] = 26; od[p + 2] = 26; od[p + 3] = 255;
     } else {
       od[p] = 255; od[p + 1] = 255; od[p + 2] = 255; od[p + 3] = 255;

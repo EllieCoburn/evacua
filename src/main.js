@@ -1,19 +1,19 @@
 import { ImageProcessor } from './image-processor.js';
 import { Overlay } from './overlay.js';
-import { WallDetector } from './wall-detector.js';
 import { ICONS, preloadIcons } from './icon-library.js';
 import { cleanFloorPlan } from './plan-cleaner.js';
+import { vectorizeFloorPlan, renderVectorPlan, findWallAt } from './plan-vectorizer.js';
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const state = {
   imageProcessor: null,
   overlay: null,
-  wallDetector: null,
   currentPlan: null,
-  showDetection: false,
   originalImage: null,   // what the user uploaded (Image)
-  cleanPlan: null,       // auto-converted outline (canvas)
+  cleanPlan: null,       // reconstructed plan (canvas)
+  vectorPlan: null,      // { walls, doors, width, height } — the geometry
+  vectorOpts: { minWallLen: 20, bridgeGap: 5 },
   view: 'clean',
   planInfo: {
     title: 'EMERGENCY EVACUATION PLAN',
@@ -29,7 +29,7 @@ function init() {
   setupCanvases();
   setupEventListeners();
   setupToolButtons();
-  setupDetectionControls();
+  setupConvertControls();
   setupPlanInfo();
 
   preloadIcons().then(() => {
@@ -56,7 +56,74 @@ function setupCanvases() {
   state.imageProcessor = new ImageProcessor(imageCanvas, overlayCanvas);
   state.overlay = new Overlay(overlayCanvas, state.imageProcessor);
   state.overlay.planInfo = state.planInfo;
-  state.wallDetector = new WallDetector(state.imageProcessor);
+  state.overlay.onWallErase = (pos) => eraseWallAt(pos);
+}
+
+// Reconstruct the floor plan from the original upload and swap it in as the base
+function reconstructPlan({ silent = false } = {}) {
+  if (!state.originalImage) {
+    if (!silent) showToast('Upload a floor plan first', 'error');
+    return false;
+  }
+
+  const plan = vectorizeFloorPlan(state.originalImage, state.vectorOpts);
+  state.vectorPlan = plan;
+
+  if (plan.walls.length < 4) {
+    // Not enough structure found — keep the raster trace as the base
+    updateVectorStats(plan, true);
+    if (!silent) {
+      showToast('Not enough wall structure found — showing the traced version instead', 'info');
+    }
+    return false;
+  }
+
+  state.cleanPlan = renderVectorPlan(plan);
+  state.view = 'clean';
+  state.imageProcessor.currentImage = state.cleanPlan;
+  state.imageProcessor.fitToScreen();
+  state.imageProcessor.render();
+  state.overlay.render();
+  updateViewToggle();
+  updateVectorStats(plan, false);
+
+  if (!silent) {
+    showToast(
+      `Reconstructed ${plan.walls.length} walls` +
+      (plan.doors.length ? ` and ${plan.doors.length} door openings` : ''),
+      'success'
+    );
+  }
+  return true;
+}
+
+function updateVectorStats(plan, fellBack) {
+  const el = document.getElementById('vector-stats');
+  if (!el) return;
+  if (!plan) {
+    el.textContent = '';
+  } else if (fellBack) {
+    el.textContent = `Found only ${plan.walls.length} wall segments — using the traced image as the base. Try lowering Minimum Wall Length.`;
+  } else {
+    el.textContent = `${plan.walls.length} walls, ${plan.doors.length} door openings. Use the Wall Eraser to remove any false walls.`;
+  }
+}
+
+function eraseWallAt(pos) {
+  if (!state.vectorPlan) return;
+
+  const { imageX, imageY } = state.imageProcessor.canvasToImageCoords(pos.x, pos.y);
+  const idx = findWallAt(state.vectorPlan, imageX, imageY);
+  if (idx === -1) return;
+
+  state.vectorPlan.walls.splice(idx, 1);
+  state.cleanPlan = renderVectorPlan(state.vectorPlan);
+  if (state.view === 'clean') {
+    state.imageProcessor.currentImage = state.cleanPlan;
+    state.imageProcessor.render();
+    state.overlay.render();
+  }
+  updateVectorStats(state.vectorPlan, false);
 }
 
 function setupPlanInfo() {
@@ -89,99 +156,52 @@ function setupPlanInfo() {
   }
 }
 
-function setupDetectionControls() {
-  const detectBtn = document.getElementById('detect-walls-btn');
-  const controls = document.getElementById('detection-controls');
-  const sensitivitySlider = document.getElementById('sensitivity-slider');
-  const blurSlider = document.getElementById('blur-slider');
-  const showDetectionCheckbox = document.getElementById('show-detection');
-  const extractBtn = document.getElementById('extract-walls-btn');
-  const clearBtn = document.getElementById('clear-detection-btn');
+function setupConvertControls() {
+  const vectorizeBtn = document.getElementById('vectorize-btn');
+  const minWallSlider = document.getElementById('minwall-slider');
+  const bridgeSlider = document.getElementById('bridge-slider');
+  const wallEraserBtn = document.getElementById('wall-eraser-btn');
 
-  const runDetection = () => {
-    const detectionCanvas = state.wallDetector.detect();
-    if (!detectionCanvas) {
-      showToast('Upload a floor plan first', 'error');
-      return false;
+  vectorizeBtn.addEventListener('click', () => {
+    showToast('Analyzing floor plan structure...', 'info');
+    setTimeout(() => reconstructPlan(), 30);
+  });
+
+  minWallSlider.addEventListener('input', (e) => {
+    document.getElementById('minwall-value').textContent =
+      e.target.value + 'px — lower keeps more detail, higher removes clutter';
+  });
+  minWallSlider.addEventListener('change', (e) => {
+    state.vectorOpts.minWallLen = parseInt(e.target.value);
+    if (state.vectorPlan) reconstructPlan({ silent: true });
+  });
+
+  bridgeSlider.addEventListener('input', (e) => {
+    document.getElementById('bridge-value').textContent =
+      e.target.value + 'px — joins broken lines; keep low to preserve doorways';
+  });
+  bridgeSlider.addEventListener('change', (e) => {
+    state.vectorOpts.bridgeGap = parseInt(e.target.value);
+    if (state.vectorPlan) reconstructPlan({ silent: true });
+  });
+
+  wallEraserBtn.addEventListener('click', () => {
+    const activating = !wallEraserBtn.classList.contains('active');
+    document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+    wallEraserBtn.classList.toggle('active', activating);
+
+    if (activating) {
+      state.overlay.setTool('erase-wall');
+      showToast('Wall Eraser: click any wall on the map to remove it', 'info');
+    } else {
+      state.overlay.setTool('select');
     }
-    state.imageProcessor.detectionOverlay = detectionCanvas;
-    state.imageProcessor.render();
-    return true;
-  };
-
-  detectBtn.addEventListener('click', () => {
-    if (!state.imageProcessor.currentImage) {
-      showToast('Upload a floor plan first', 'error');
-      return;
-    }
-
-    showToast('Detecting walls...', 'info');
-
-    setTimeout(() => {
-      if (runDetection()) {
-        controls.style.display = 'block';
-        showDetectionCheckbox.checked = true;
-        state.showDetection = true;
-        showToast('Detected walls are highlighted in red — tune the sliders, then apply', 'success');
-      }
-    }, 30);
   });
 
-  // Update readouts live while dragging; re-run detection on release
-  sensitivitySlider.addEventListener('input', (e) => {
-    document.getElementById('sensitivity-value').textContent =
-      Math.round(parseFloat(e.target.value) * 100) + '%';
-  });
-  sensitivitySlider.addEventListener('change', (e) => {
-    state.wallDetector.setSensitivity(parseFloat(e.target.value));
-    if (state.showDetection) runDetection();
-  });
-
-  blurSlider.addEventListener('input', (e) => {
-    document.getElementById('blur-value').textContent = e.target.value + 'px';
-  });
-  blurSlider.addEventListener('change', (e) => {
-    state.wallDetector.setBlurRadius(parseInt(e.target.value));
-    if (state.showDetection) runDetection();
-  });
-
-  showDetectionCheckbox.addEventListener('change', (e) => {
-    state.showDetection = e.target.checked;
-    state.imageProcessor.detectionOverlay =
-      state.showDetection ? state.wallDetector.detectedWalls : null;
-    state.imageProcessor.render();
-  });
-
-  // Replace the base image with a clean plan built from the detected walls
-  extractBtn.addEventListener('click', () => {
-    const planCanvas = state.wallDetector.toPlanCanvas();
-    if (!planCanvas) {
-      showToast('Run Detect Walls first', 'error');
-      return;
-    }
-
-    state.cleanPlan = planCanvas;
-    state.view = 'clean';
-    state.imageProcessor.currentImage = planCanvas;
-    state.imageProcessor.detectionOverlay = null;
-    state.showDetection = false;
-    showDetectionCheckbox.checked = false;
-    state.imageProcessor.fitToScreen();
-    state.imageProcessor.render();
-    state.overlay.render();
-    updateViewToggle();
-    showToast('Detected walls applied as your base plan — press "Original" any time to compare', 'success');
-  });
-
-  clearBtn.addEventListener('click', () => {
-    state.wallDetector.clear();
-    state.showDetection = false;
-    showDetectionCheckbox.checked = false;
-    controls.style.display = 'none';
-    state.imageProcessor.detectionOverlay = null;
-    state.imageProcessor.render();
-    state.overlay.render();
-    showToast('Detection cleared', 'info');
+  // Leaving wall-eraser mode via any other tool clears its highlight
+  window.addEventListener('tool-changed', (e) => {
+    if (e.detail !== 'erase-wall') wallEraserBtn.classList.remove('active');
   });
 }
 
@@ -406,6 +426,7 @@ function setupToolButtons() {
 
       document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('wall-eraser-btn')?.classList.remove('active');
       btn.classList.add('active');
 
       state.overlay.setTool(tool);
@@ -438,6 +459,7 @@ function buildIconPalette() {
 
     btn.addEventListener('click', () => {
       document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('wall-eraser-btn')?.classList.remove('active');
       btn.classList.add('active');
 
       if (icon.isRoute) {
@@ -544,27 +566,40 @@ async function loadImage(file) {
     await state.imageProcessor.loadImage(loadSource);
     state.originalImage = state.imageProcessor.currentImage;
 
-    // Hide detection controls
-    document.getElementById('detection-controls').style.display = 'none';
-
-    // Auto-convert to a clean floor plan outline
-    showToast('Converting to clean floor plan...', 'info');
+    // Analyze and reconstruct the floor plan automatically
+    showToast('Analyzing floor plan structure...', 'info');
     await new Promise(resolve => setTimeout(resolve, 30)); // let the toast paint
 
     try {
+      // Raster trace first — the fallback base if reconstruction finds
+      // too little structure (e.g. a photo of a room, not of a plan)
       state.cleanPlan = cleanFloorPlan(state.originalImage);
       state.view = 'clean';
       state.imageProcessor.currentImage = state.cleanPlan;
       state.imageProcessor.fitToScreen();
       state.imageProcessor.render();
       updateViewToggle();
-      showToast('Converted! Add your symbols — or press "Original" to compare.', 'success');
+
+      // Full vector reconstruction: extract wall geometry and redraw.
+      // Every source converges to the same clean drafted output.
+      reconstructPlan({ silent: true });
+
+      if (state.vectorPlan && state.vectorPlan.walls.length >= 4) {
+        showToast(
+          `Reconstructed ${state.vectorPlan.walls.length} walls` +
+          (state.vectorPlan.doors.length ? ` and ${state.vectorPlan.doors.length} door openings` : '') +
+          ' — add your symbols, or refine in the Convert tab',
+          'success'
+        );
+      } else {
+        showToast('Converted to a traced plan — for a full reconstruction, try the Convert tab', 'info');
+      }
     } catch (cleanErr) {
-      console.error('Auto-clean failed, showing original:', cleanErr);
+      console.error('Auto-conversion failed, showing original:', cleanErr);
       state.cleanPlan = null;
       state.view = 'original';
       updateViewToggle();
-      showToast('Floor plan loaded (couldn\'t auto-clean this one)', 'info');
+      showToast('Floor plan loaded (couldn\'t auto-convert this one)', 'info');
     }
 
     // Render overlay

@@ -36,7 +36,7 @@
     <aside class="panel left">
       <div class="panel-tabs">
         <button class="tab-btn active" data-tab="tools">Tools</button>
-        <button class="tab-btn" data-tab="detect">Detection</button>
+        <button class="tab-btn" data-tab="detect">Convert</button>
         <button class="tab-btn" data-tab="props">Properties</button>
       </div>
 
@@ -66,45 +66,40 @@
         </div>
       </div>
 
-      <!-- Detection Panel -->
+      <!-- Convert Panel -->
       <div class="tab-content" id="tab-detect">
-        <h3>Wall Detection</h3>
+        <h3>Floor Plan Reconstruction</h3>
         <p style="font-size: 12px; color: var(--c-fg-muted); margin-bottom: 12px;">
-          Highlights detected walls in red. Tune the sliders, then apply the
-          result as your clean base plan.
+          Analyzes your upload, extracts the wall geometry, discards text and
+          clutter, and redraws a clean vector floor plan. Runs automatically
+          on upload — re-run here after tuning.
         </p>
 
-        <button class="btn btn-primary" id="detect-walls-btn" style="width: 100%; margin-bottom: 12px;">
-          Detect Walls
+        <button class="btn btn-primary" id="vectorize-btn" style="width: 100%; margin-bottom: 12px;">
+          Reconstruct Floor Plan
         </button>
 
-        <div id="detection-controls" style="display: none;">
+        <div id="vector-controls">
           <label style="display: block; margin-bottom: 12px;">
-            <span style="font-size: 12px; font-weight: 500;">Sensitivity</span>
-            <input type="range" id="sensitivity-slider" min="0.1" max="0.9" step="0.1" value="0.3" 
+            <span style="font-size: 12px; font-weight: 500;">Minimum Wall Length</span>
+            <input type="range" id="minwall-slider" min="10" max="60" step="2" value="20"
                    style="width: 100%; margin-top: 4px;">
-            <span id="sensitivity-value" style="font-size: 11px; color: var(--c-fg-muted);">30%</span>
+            <span id="minwall-value" style="font-size: 11px; color: var(--c-fg-muted);">20px — lower keeps more detail, higher removes clutter</span>
           </label>
 
           <label style="display: block; margin-bottom: 12px;">
-            <span style="font-size: 12px; font-weight: 500;">Blur Radius</span>
-            <input type="range" id="blur-slider" min="1" max="5" step="1" value="2" 
+            <span style="font-size: 12px; font-weight: 500;">Gap Bridging</span>
+            <input type="range" id="bridge-slider" min="0" max="14" step="1" value="5"
                    style="width: 100%; margin-top: 4px;">
-            <span id="blur-value" style="font-size: 11px; color: var(--c-fg-muted);">2px</span>
+            <span id="bridge-value" style="font-size: 11px; color: var(--c-fg-muted);">5px — joins broken lines; keep low to preserve doorways</span>
           </label>
 
-          <label class="checkbox" style="margin-bottom: 12px;">
-            <input type="checkbox" id="show-detection">
-            <span>Show Detection Overlay</span>
-          </label>
-
-          <button class="btn" id="extract-walls-btn" style="width: 100%; margin-top: 12px;">
-            Apply as Base Plan
+          <button class="tool-btn" id="wall-eraser-btn" style="width: 100%; margin-top: 4px;"
+                  title="Click any reconstructed wall on the map to remove it">
+            <i data-ico="erase"></i> Wall Eraser
           </button>
 
-          <button class="btn" id="clear-detection-btn" style="width: 100%; margin-top: 8px;">
-            Clear Detection
-          </button>
+          <div id="vector-stats" style="font-size: 11px; color: var(--c-fg-muted); margin-top: 12px;"></div>
         </div>
       </div>
 

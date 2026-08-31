@@ -137,6 +137,9 @@ export class Overlay {
         this.removeElement(hit);
         if (this.selectedElement === hit) this.selectElement(null);
       }
+    } else if (this.currentTool === 'erase-wall') {
+      // Handled by the app, which owns the reconstructed wall geometry
+      if (this.onWallErase) this.onWallErase(pos);
     } else if (this.currentTool === 'text') {
       const text = window.prompt('Label text:', '');
       if (text && text.trim()) {
@@ -274,6 +277,8 @@ export class Overlay {
     const drawTools = ['add-icon', 'draw-arrow', 'draw-line', 'arrow', 'text'];
     let cursor = 'default';
     if (drawTools.includes(this.currentTool)) {
+      cursor = 'crosshair';
+    } else if (this.currentTool === 'erase-wall') {
       cursor = 'crosshair';
     } else if (this.currentTool === 'erase') {
       cursor = this.hitTestAll(pos) ? 'pointer' : 'crosshair';
