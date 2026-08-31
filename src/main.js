@@ -1,11 +1,14 @@
 import { ImageProcessor } from './image-processor.js';
 import { Overlay } from './overlay.js';
+import { WallDetector } from './wall-detector.js';
 import { ICONS } from './icon-library.js';
 
 const state = {
   imageProcessor: null,
   overlay: null,
+  wallDetector: null,
   currentPlan: null,
+  showDetection: false,
 };
 
 function init() {
@@ -13,6 +16,7 @@ function init() {
   setupEventListeners();
   setupToolButtons();
   setupIconButtons();
+  setupDetectionControls();
   console.log('Evacua initialized');
 }
 
@@ -20,7 +24,6 @@ function setupCanvases() {
   const imageCanvas = document.getElementById('image-canvas');
   const overlayCanvas = document.getElementById('overlay-canvas');
 
-  // Set canvas size to window size
   const resizeCanvases = () => {
     imageCanvas.width = imageCanvas.offsetWidth;
     imageCanvas.height = imageCanvas.offsetHeight;
@@ -31,13 +34,92 @@ function setupCanvases() {
   resizeCanvases();
   window.addEventListener('resize', resizeCanvases);
 
-  // Initialize processors
   state.imageProcessor = new ImageProcessor(imageCanvas, overlayCanvas);
   state.overlay = new Overlay(overlayCanvas, state.imageProcessor);
+  state.wallDetector = new WallDetector(state.imageProcessor);
+}
+
+function setupDetectionControls() {
+  const detectBtn = document.getElementById('detect-walls-btn');
+  const controls = document.getElementById('detection-controls');
+  const sensitivitySlider = document.getElementById('sensitivity-slider');
+  const blurSlider = document.getElementById('blur-slider');
+  const showDetectionCheckbox = document.getElementById('show-detection');
+  const extractBtn = document.getElementById('extract-walls-btn');
+  const clearBtn = document.getElementById('clear-detection-btn');
+
+  detectBtn.addEventListener('click', () => {
+    showToast('Detecting walls... this may take a moment', 'info');
+    
+    setTimeout(() => {
+      const detectionCanvas = state.wallDetector.detect();
+      if (detectionCanvas) {
+        controls.style.display = 'block';
+        showToast('Walls detected! Adjust settings to refine', 'success');
+        state.showDetection = true;
+        renderWithDetection();
+      } else {
+        showToast('No image uploaded yet', 'error');
+      }
+    }, 100);
+  });
+
+  sensitivitySlider.addEventListener('input', (e) => {
+    state.wallDetector.setSensitivity(parseFloat(e.target.value));
+    document.getElementById('sensitivity-value').textContent = 
+      Math.round(parseFloat(e.target.value) * 100) + '%';
+    
+    state.wallDetector.detect();
+    if (state.showDetection) {
+      renderWithDetection();
+    }
+  });
+
+  blurSlider.addEventListener('input', (e) => {
+    state.wallDetector.setBlurRadius(parseInt(e.target.value));
+    document.getElementById('blur-value').textContent = e.target.value + 'px';
+    
+    state.wallDetector.detect();
+    if (state.showDetection) {
+      renderWithDetection();
+    }
+  });
+
+  showDetectionCheckbox.addEventListener('change', (e) => {
+    state.showDetection = e.target.checked;
+    renderWithDetection();
+  });
+
+  extractBtn.addEventListener('click', () => {
+    const lines = state.wallDetector.extractWallLines();
+    showToast(`Extracted ${lines.length} wall segments. Refine manually if needed.`, 'info');
+    // TODO: Convert detected lines to editable wall elements
+  });
+
+  clearBtn.addEventListener('click', () => {
+    state.wallDetector.detectedWalls = null;
+    state.showDetection = false;
+    showDetectionCheckbox.checked = false;
+    controls.style.display = 'none';
+    state.imageProcessor.render();
+    state.overlay.render();
+    showToast('Detection cleared', 'info');
+  });
+}
+
+function renderWithDetection() {
+  state.imageProcessor.render();
+  
+  if (state.showDetection && state.wallDetector.detectedWalls) {
+    const overlayCanvas = document.getElementById('overlay-canvas');
+    const ctx = overlayCanvas.getContext('2d');
+    state.wallDetector.renderDetection(overlayCanvas);
+  }
+  
+  state.overlay.render();
 }
 
 function setupEventListeners() {
-  // File input
   document.getElementById('file-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -46,7 +128,6 @@ function setupEventListeners() {
     e.target.value = '';
   });
 
-  // Upload zone drag-and-drop
   const uploadZone = document.getElementById('upload-zone');
   uploadZone.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -65,7 +146,6 @@ function setupEventListeners() {
     }
   });
 
-  // Tab buttons
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
@@ -73,7 +153,6 @@ function setupEventListeners() {
     });
   });
 
-  // Canvas controls
   document.querySelectorAll('[data-ctrl]').forEach(btn => {
     btn.addEventListener('click', () => {
       const ctrl = btn.dataset.ctrl;
@@ -81,7 +160,6 @@ function setupEventListeners() {
     });
   });
 
-  // Action buttons
   document.querySelectorAll('[data-act]').forEach(btn => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.act;
@@ -89,7 +167,6 @@ function setupEventListeners() {
     });
   });
 
-  // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     if (e.key === '+' || e.key === '=') {
       e.preventDefault();
@@ -114,7 +191,6 @@ function setupToolButtons() {
     btn.addEventListener('click', () => {
       const tool = btn.dataset.tool;
       
-      // Update active state
       document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
@@ -129,12 +205,10 @@ function setupIconButtons() {
       const iconType = btn.dataset.icon;
       
       if (ICONS[iconType]?.isRoute) {
-        // For routes, switch to draw mode
         state.overlay.currentIconType = iconType;
         state.overlay.setTool('draw-arrow');
         showToast(`Click canvas to start ${ICONS[iconType].name}`, 'info');
       } else {
-        // For icons, enter placement mode
         state.overlay.setIconTool(iconType);
         showToast(`Click to place ${ICONS[iconType].name}`, 'info');
       }
@@ -146,14 +220,13 @@ async function loadImage(file) {
   try {
     await state.imageProcessor.loadImage(file);
     
-    // Show editor, hide upload zone
     document.getElementById('upload-zone').style.display = 'none';
     document.getElementById('editor-container').style.display = 'flex';
+    document.getElementById('detection-controls').style.display = 'none';
     
-    // Re-render overlay
     state.overlay.render();
 
-    showToast('Image loaded! Start adding evacuation markers', 'success');
+    showToast('Image loaded! Use wall detection or add markers manually', 'success');
   } catch (err) {
     showToast(`Failed to load image: ${err.message}`, 'error');
   }
@@ -214,23 +287,19 @@ function exportPlan() {
 }
 
 function showTab(tab, panel) {
-  // Hide all tabs in this panel
   panel.querySelectorAll('.tab-content').forEach(el => {
     el.classList.remove('active');
   });
 
-  // Hide all tab buttons
   panel.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.remove('active');
   });
 
-  // Show selected tab
   const tabContent = panel.querySelector(`#tab-${tab}`);
   if (tabContent) {
     tabContent.classList.add('active');
   }
 
-  // Highlight selected button
   event.target.classList.add('active');
 }
 
@@ -245,13 +314,23 @@ function showHelp() {
       <div class="modal-body">
         <h3>Getting Started</h3>
         <ol>
-          <li><strong>Upload a floor plan</strong> - Drag and drop an image, PDF, or video of your space</li>
+          <li><strong>Upload a floor plan</strong> - Drag and drop an image of your space</li>
+          <li><strong>Auto-detect walls (optional)</strong> - Click "Detect Walls" to automatically extract walls and structures</li>
           <li><strong>Add safety markers</strong> - Click icon buttons to place emergency equipment</li>
           <li><strong>Draw evacuation routes</strong> - Use arrow tools to draw escape paths</li>
           <li><strong>Export your map</strong> - Download as PNG for printing or sharing</li>
         </ol>
 
-        <h3>Tools</h3>
+        <h3>Wall Detection</h3>
+        <ul>
+          <li>Go to <strong>Detection</strong> tab after uploading an image</li>
+          <li>Click <strong>Detect Walls</strong> to analyze the image</li>
+          <li>Adjust <strong>Sensitivity</strong> and <strong>Blur Radius</strong> sliders to fine-tune detection</li>
+          <li>Check <strong>Show Detection Overlay</strong> to see detected walls overlaid</li>
+          <li>Click <strong>Extract Detected Walls</strong> to convert to editable elements</li>
+        </ul>
+
+        <h3>Emergency Symbols</h3>
         <ul>
           <li><strong>🚪 Emergency Exit</strong> - Mark all exits</li>
           <li><strong>→ Primary Route</strong> - Main evacuation path</li>
@@ -291,7 +370,6 @@ function showToast(message, type = 'info') {
   }, 3000);
 }
 
-// Start when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
