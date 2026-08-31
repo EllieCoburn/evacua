@@ -36,13 +36,32 @@ function getWorker() {
   return worker;
 }
 
-export function visionRequest(type, payload, onProgress, transfer) {
+export function visionRequest(type, payload, onProgress, transfer, timeoutMs) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, onProgress });
+    let timer = null;
+    if (timeoutMs) {
+      // Hard watchdog: a hung analysis can never freeze the flow. Kill the
+      // worker (a stuck WASM call can't be interrupted any other way) so
+      // the next request gets a fresh one.
+      timer = setTimeout(() => {
+        pending.delete(id);
+        try { worker?.terminate(); } catch (e) { /* already dead */ }
+        worker = null;
+        reject(new Error(`Analysis exceeded ${Math.round(timeoutMs / 1000)}s and was stopped`));
+      }, timeoutMs);
+    }
+
+    pending.set(id, {
+      resolve: (v) => { if (timer) clearTimeout(timer); resolve(v); },
+      reject: (e) => { if (timer) clearTimeout(timer); reject(e); },
+      onProgress
+    });
+
     try {
       getWorker().postMessage({ id, type, payload }, transfer || []);
     } catch (err) {
+      if (timer) clearTimeout(timer);
       pending.delete(id);
       reject(err);
     }

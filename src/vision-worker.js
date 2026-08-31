@@ -92,36 +92,45 @@ function vectorize(cv, payload, progress) {
       if (dvals[i] > 0.8) samples.push(dvals[i]);
     }
     samples.sort((a, b) => a - b);
+    // Two thickness estimates: p92 captures main/exterior walls (used for
+    // rendering and door scale); p65 captures thinner interior partitions
+    // (used to size the isolation kernel so partitions survive)
     const p92 = samples.length ? samples[Math.floor(samples.length * 0.92)] : 2.5;
+    const p65 = samples.length ? samples[Math.floor(samples.length * 0.65)] : 2;
     const wallT = Math.max(4, Math.min(40, Math.round(p92 * 2)));
+    const thinT = Math.max(3, Math.min(wallT, Math.round(p65 * 2)));
 
     progress(60, 'Isolating walls…');
-    const kOpen = Math.max(2, Math.round(wallT * 0.5));
-    const kernelO = track(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kOpen, kOpen)));
-    const walls = track(new cv.Mat());
-    cv.morphologyEx(bin, walls, cv.MORPH_OPEN, kernelO);
-
     const bridgeFactor = ((opts.bridgeGap ?? 5) / 5);
-    const kClose = Math.max(1, Math.round(wallT * 0.5 * bridgeFactor + 1));
-    const kernelC = track(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kClose, kClose)));
-    cv.morphologyEx(walls, walls, cv.MORPH_CLOSE, kernelC);
-
-    progress(70, 'Removing clutter…');
-    const labels = track(new cv.Mat());
-    const stats = track(new cv.Mat());
-    const centroids = track(new cv.Mat());
-    const nLabels = cv.connectedComponentsWithStats(walls, labels, stats, centroids, 8);
     const detail = (opts.minWallLen ?? 20) / 20;
     const minArea = Math.round(wallT * wallT * 2.5 * detail);
-    const keep = new Uint8Array(nLabels);
-    for (let i = 1; i < nLabels; i++) {
-      if (stats.data32S[i * 5 + cv.CC_STAT_AREA] >= minArea) keep[i] = 1;
+    const kClose = Math.max(1, Math.round(wallT * 0.5 * bridgeFactor + 1));
+
+    // Candidate sweep: build the wall mask at multiple isolation strengths
+    // and keep the best-scoring reconstruction. A gentler kernel keeps thin
+    // partitions; a stronger one suppresses noise — which wins depends on
+    // the source, so we measure instead of guessing.
+    progress(66, 'Optimizing reconstruction…');
+    const kernelSizes = [...new Set([
+      Math.max(2, Math.round(thinT * 0.55)),
+      Math.max(2, Math.round(wallT * 0.5))
+    ])];
+
+    let walls = null;
+    let bestScore = -Infinity;
+    for (const kOpen of kernelSizes) {
+      const cand = buildWallMask(cv, bin, w, h, kOpen, kClose, minArea);
+      // Favor captured structure, penalize fragmentation
+      const score = cand.pixels - cand.nComp * minArea * 0.8;
+      if (score > bestScore) {
+        if (walls) walls.delete();
+        walls = cand.mat;
+        bestScore = score;
+      } else {
+        cand.mat.delete();
+      }
     }
-    const labData = labels.data32S;
-    const wallData = walls.data;
-    for (let i = 0; i < w * h; i++) {
-      wallData[i] = keep[labData[i]] ? 255 : 0;
-    }
+    track(walls);
 
     progress(80, 'Finding doors and windows…');
     const thin = track(new cv.Mat());
@@ -187,7 +196,7 @@ function vectorize(cv, payload, progress) {
       for (let j = 0; j < approx.rows; j++) {
         pts.push({ x: d[j * 2], y: d[j * 2 + 1] });
       }
-      rings.push({ pts, parent: hier[i * 4 + 3] });
+      rings.push({ pts: regularizeRing(pts), parent: hier[i * 4 + 3] });
       approx.delete();
       c.delete();
     }
@@ -223,6 +232,94 @@ function vectorize(cv, payload, progress) {
       try { m.delete(); } catch (err) { /* already deleted */ }
     }
   }
+}
+
+// Build one wall-mask candidate: open (isolate by thickness), close
+// (bridge breaks), drop small components. Returns the mask + stats.
+function buildWallMask(cv, bin, w, h, kOpen, kClose, minArea) {
+  const kernelO = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kOpen, kOpen));
+  const mat = new cv.Mat();
+  cv.morphologyEx(bin, mat, cv.MORPH_OPEN, kernelO);
+  kernelO.delete();
+
+  const kernelC = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kClose, kClose));
+  cv.morphologyEx(mat, mat, cv.MORPH_CLOSE, kernelC);
+  kernelC.delete();
+
+  const labels = new cv.Mat();
+  const stats = new cv.Mat();
+  const centroids = new cv.Mat();
+  const nLabels = cv.connectedComponentsWithStats(mat, labels, stats, centroids, 8);
+
+  const keep = new Uint8Array(nLabels);
+  let nComp = 0;
+  for (let i = 1; i < nLabels; i++) {
+    if (stats.data32S[i * 5 + cv.CC_STAT_AREA] >= minArea) {
+      keep[i] = 1;
+      nComp++;
+    }
+  }
+  const labData = labels.data32S;
+  const matData = mat.data;
+  let pixels = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (keep[labData[i]]) {
+      matData[i] = 255;
+      pixels++;
+    } else {
+      matData[i] = 0;
+    }
+  }
+
+  labels.delete();
+  stats.delete();
+  centroids.delete();
+
+  return { mat, nComp, pixels };
+}
+
+// Rectilinear regularization: real plans are mostly orthogonal. Edges
+// within ~8 degrees of horizontal/vertical are snapped exactly straight,
+// then redundant vertices are dropped — jagged pixel noise becomes
+// drafted line work.
+function regularizeRing(pts) {
+  if (pts.length < 3) return pts;
+  const out = pts.map(p => ({ x: p.x, y: p.y }));
+  const n = out.length;
+
+  // Rounded snapping converges to stable integer coordinates over passes
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < n; i++) {
+      const a = out[i];
+      const b = out[(i + 1) % n];
+      const adx = Math.abs(b.x - a.x);
+      const ady = Math.abs(b.y - a.y);
+      if (adx >= ady && ady <= Math.max(2, adx * 0.14)) {
+        const ym = Math.round((a.y + b.y) / 2);
+        a.y = ym; b.y = ym;
+      } else if (ady > adx && adx <= Math.max(2, ady * 0.14)) {
+        const xm = Math.round((a.x + b.x) / 2);
+        a.x = xm; b.x = xm;
+      }
+    }
+  }
+
+  // Drop near-duplicate and near-collinear vertices (by perpendicular
+  // distance, so long straightened edges collapse to two endpoints)
+  const cleaned = [];
+  for (let i = 0; i < n; i++) {
+    const prev = cleaned.length ? cleaned[cleaned.length - 1] : out[(i - 1 + n) % n];
+    const cur = out[i];
+    const next = out[(i + 1) % n];
+    if (Math.hypot(cur.x - prev.x, cur.y - prev.y) < 1.2) continue;
+    const ex = next.x - prev.x;
+    const ey = next.y - prev.y;
+    const len = Math.hypot(ex, ey) || 1;
+    const dist = Math.abs((cur.x - prev.x) * ey - (cur.y - prev.y) * ex) / len;
+    if (dist < 0.9) continue;
+    cleaned.push(cur);
+  }
+  return cleaned.length >= 3 ? cleaned : out;
 }
 
 // ---------------- Pure-JS raster trace (fallback, no OpenCV) ----------------

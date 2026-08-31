@@ -112,7 +112,8 @@ async function reconstructPlan({ silent = false } = {}) {
           opts: state.vectorOpts
         },
         (pct, label) => setProgress(pct, label),
-        [imageData.data.buffer]
+        [imageData.data.buffer],
+        90000 // hard cap: reconstruction may never hang the flow
       );
 
       // Scale geometry from working resolution to source coordinates
@@ -154,7 +155,8 @@ async function reconstructPlan({ silent = false } = {}) {
       'trace',
       { width: traceData.width, height: traceData.height, buffer: traceData.data.buffer },
       (pct, label) => setProgress(pct, label),
-      [traceData.data.buffer]
+      [traceData.data.buffer],
+      60000
     );
 
     state.vectorPlan = plan; // may be null or a too-sparse plan
