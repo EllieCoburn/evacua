@@ -65,22 +65,45 @@ function setupCanvases() {
 
 // ---- Processing overlay ----
 
+const processing = { pct: 0, lastRealUpdate: 0, heartbeat: null };
+
 function showProcessing(label) {
   const overlay = document.getElementById('processing-overlay');
   if (overlay) overlay.hidden = false;
-  setProgress(0, label);
+  processing.pct = 0;
+  processing.lastRealUpdate = Date.now();
+  paintProgress(0, label);
+
+  // Heartbeat: if no real progress event arrives for a moment, creep the
+  // bar forward slightly so the user always sees the app is alive
+  clearInterval(processing.heartbeat);
+  processing.heartbeat = setInterval(() => {
+    if (Date.now() - processing.lastRealUpdate > 1000 && processing.pct < 95) {
+      processing.pct = Math.min(processing.pct + 0.4, 95);
+      paintProgress(processing.pct, null);
+    }
+  }, 500);
 }
 
 function setProgress(pct, label) {
+  // Real event: never move backwards past heartbeat creep
+  processing.pct = Math.max(processing.pct, Math.max(0, Math.min(100, pct)));
+  processing.lastRealUpdate = Date.now();
+  paintProgress(processing.pct, label);
+}
+
+function paintProgress(pct, label) {
   const fill = document.getElementById('processing-fill');
   const pctEl = document.getElementById('processing-pct');
   const labelEl = document.getElementById('processing-label');
-  if (fill) fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  if (fill) fill.style.width = pct + '%';
   if (pctEl) pctEl.textContent = Math.round(pct) + '%';
   if (label && labelEl) labelEl.textContent = label;
 }
 
 function hideProcessing() {
+  clearInterval(processing.heartbeat);
+  processing.heartbeat = null;
   const overlay = document.getElementById('processing-overlay');
   if (overlay) overlay.hidden = true;
 }
@@ -113,7 +136,7 @@ async function reconstructPlan({ silent = false } = {}) {
         },
         (pct, label) => setProgress(pct, label),
         [imageData.data.buffer],
-        90000 // hard cap: reconstruction may never hang the flow
+        120000 // hard cap (incl. engine download on slow networks): may never hang
       );
 
       // Scale geometry from working resolution to source coordinates

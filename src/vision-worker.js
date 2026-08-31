@@ -7,28 +7,64 @@ const OPENCV_CDN = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-rel
 
 let cvReadyPromise = null;
 
-function ensureCV() {
+// Engine-load progress is broadcast without a request id; the client
+// forwards it to whichever requests are waiting.
+function broadcast(pct, label) {
+  self.postMessage({ type: 'engine-progress', pct, label });
+}
+
+// Stream the engine download so progress is visible, then compile.
+// (A bare importScripts(URL) is synchronous: it would freeze this worker's
+// event loop for the whole download and no progress could ever be posted.)
+async function ensureCV() {
   if (cvReadyPromise) return cvReadyPromise;
-  cvReadyPromise = new Promise((resolve, reject) => {
+
+  cvReadyPromise = (async () => {
+    broadcast(2, 'Downloading vision engine…');
+
+    const resp = await fetch(OPENCV_CDN);
+    if (!resp.ok) throw new Error(`Engine download failed (HTTP ${resp.status})`);
+
+    const total = Number(resp.headers.get('Content-Length')) || 9_000_000;
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      broadcast(2 + Math.min(28, (received / total) * 28), 'Downloading vision engine…');
+    }
+
+    broadcast(32, 'Compiling vision engine…');
+    const blobUrl = URL.createObjectURL(new Blob(chunks, { type: 'text/javascript' }));
     try {
-      importScripts(OPENCV_CDN);
-    } catch (e) {
-      cvReadyPromise = null;
-      reject(new Error('Could not download the vision engine'));
-      return;
+      importScripts(blobUrl); // compile only — the download is already done
+    } finally {
+      URL.revokeObjectURL(blobUrl);
     }
+
     const cv = self.cv;
-    if (!cv) {
-      cvReadyPromise = null;
-      reject(new Error('Vision engine failed to initialize'));
-    } else if (typeof cv.then === 'function') {
-      cv.then((mod) => { self.cv = mod; resolve(mod); });
-    } else if (cv.Mat) {
-      resolve(cv);
-    } else {
-      cv.onRuntimeInitialized = () => resolve(self.cv);
-    }
-  });
+    const mod = await new Promise((resolve, reject) => {
+      if (!cv) {
+        reject(new Error('Vision engine failed to initialize'));
+      } else if (typeof cv.then === 'function') {
+        cv.then(resolve);
+      } else if (cv.Mat) {
+        resolve(cv);
+      } else {
+        cv.onRuntimeInitialized = () => resolve(self.cv);
+        setTimeout(() => reject(new Error('Vision engine init timed out')), 30000);
+      }
+    });
+    self.cv = mod;
+    broadcast(38, 'Engine ready');
+    return mod;
+  })();
+
+  // Allow a retry after failure
+  cvReadyPromise.catch(() => { cvReadyPromise = null; });
   return cvReadyPromise;
 }
 
@@ -41,9 +77,9 @@ self.onmessage = async (e) => {
       await ensureCV();
       self.postMessage({ id, type: 'done', result: { ready: true } });
     } else if (type === 'vectorize') {
-      progress(5, 'Loading vision engine…');
+      progress(1, 'Starting analysis…');
       const cv = await ensureCV();
-      progress(25, 'Reading image…');
+      progress(40, 'Reading image…');
       const result = vectorize(cv, payload, progress);
       self.postMessage({ id, type: 'done', result });
     } else if (type === 'trace') {
@@ -76,14 +112,14 @@ function vectorize(cv, payload, progress) {
     if (cv.mean(gray)[0] < 110) cv.bitwise_not(gray, gray);
     cv.GaussianBlur(gray, gray, new cv.Size(3, 3), 0);
 
-    progress(35, 'Separating ink from background…');
+    progress(45, 'Separating ink from background…');
     const bin = track(new cv.Mat());
     cv.adaptiveThreshold(gray, bin, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 41, 15);
     const dark = track(new cv.Mat());
     cv.threshold(gray, dark, 70, 255, cv.THRESH_BINARY_INV);
     cv.bitwise_or(bin, dark, bin);
 
-    progress(50, 'Measuring wall thickness…');
+    progress(52, 'Measuring wall thickness…');
     const dist = track(new cv.Mat());
     cv.distanceTransform(bin, dist, cv.DIST_L2, 3);
     const dvals = dist.data32F;

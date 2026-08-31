@@ -12,6 +12,16 @@ function getWorker() {
 
   worker.onmessage = (e) => {
     const msg = e.data;
+
+    // Engine-load progress has no request id — forward it to every
+    // request that's currently waiting
+    if (msg.type === 'engine-progress') {
+      for (const req of pending.values()) {
+        req.onProgress?.(msg.pct, msg.label);
+      }
+      return;
+    }
+
     const req = pending.get(msg.id);
     if (!req) return;
 
