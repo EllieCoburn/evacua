@@ -120,9 +120,11 @@ function renderWithDetection() {
 }
 
 function setupEventListeners() {
-  document.getElementById('file-input').addEventListener('change', async (e) => {
+  const fileInput = document.getElementById('file-input');
+  fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (file) {
+      console.log('File selected:', file.name, file.size, file.type);
       await loadImage(file);
     }
     e.target.value = '';
@@ -131,17 +133,25 @@ function setupEventListeners() {
   const uploadZone = document.getElementById('upload-zone');
   uploadZone.addEventListener('dragover', (e) => {
     e.preventDefault();
-    uploadZone.style.backgroundColor = 'rgba(0, 0, 0, 0.05)';
+    e.stopPropagation();
+    uploadZone.style.backgroundColor = 'rgba(37, 99, 235, 0.1)';
   });
 
-  uploadZone.addEventListener('dragleave', () => {
+  uploadZone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     uploadZone.style.backgroundColor = '';
   });
 
   uploadZone.addEventListener('drop', async (e) => {
     e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) {
+    e.stopPropagation();
+    uploadZone.style.backgroundColor = '';
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      console.log('File dropped:', file.name, file.size, file.type);
       await loadImage(file);
     }
   });
@@ -218,17 +228,69 @@ function setupIconButtons() {
 
 async function loadImage(file) {
   try {
+    // Validate file
+    if (!file) {
+      throw new Error('No file selected');
+    }
+
+    console.log('Loading image:', {
+      name: file.name,
+      size: file.size,
+      type: file.type
+    });
+
+    // Check if it's an image
+    if (!file.type.startsWith('image/')) {
+      throw new Error(`Invalid file type: ${file.type}. Please upload an image (PNG, JPG, etc.)`);
+    }
+
+    // Check file size (max 50MB)
+    if (file.size > 50 * 1024 * 1024) {
+      throw new Error('File is too large. Maximum 50MB allowed.');
+    }
+
+    showToast('Loading image...', 'info');
+
+    // Show editor before loading to ensure container has dimensions
+    const uploadZone = document.getElementById('upload-zone');
+    const editorContainer = document.getElementById('editor-container');
+    const canvases = editorContainer.querySelector('.image-viewer-container');
+
+    uploadZone.style.display = 'none';
+    editorContainer.style.display = 'flex';
+
+    // Give the DOM a moment to render
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Verify container has dimensions
+    const containerWidth = canvases.offsetWidth;
+    const containerHeight = canvases.offsetHeight;
+
+    console.log('Container dimensions:', { width: containerWidth, height: containerHeight });
+
+    if (containerWidth === 0 || containerHeight === 0) {
+      throw new Error('Canvas container has no dimensions. Please try again.');
+    }
+
+    // Load the image
     await state.imageProcessor.loadImage(file);
-    
-    document.getElementById('upload-zone').style.display = 'none';
-    document.getElementById('editor-container').style.display = 'flex';
+
+    // Hide detection controls
     document.getElementById('detection-controls').style.display = 'none';
-    
+
+    // Render overlay
     state.overlay.render();
 
-    showToast('Image loaded! Use wall detection or add markers manually', 'success');
+    console.log('Image loaded successfully');
+    showToast('Floor plan loaded! Ready to edit.', 'success');
   } catch (err) {
-    showToast(`Failed to load image: ${err.message}`, 'error');
+    console.error('Image load error:', err);
+
+    // Show editor again on error so user can retry
+    document.getElementById('upload-zone').style.display = 'flex';
+    document.getElementById('editor-container').style.display = 'none';
+
+    showToast(`Upload failed: ${err.message}`, 'error');
   }
 }
 

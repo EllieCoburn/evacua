@@ -18,35 +18,99 @@ export class ImageProcessor {
   async loadImage(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      
+
       reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          this.currentImage = img;
-          
-          // Force canvas resize
-          const container = this.imageCanvas.parentElement;
-          if (container) {
-            this.imageCanvas.width = container.offsetWidth;
-            this.imageCanvas.height = container.offsetHeight;
-            this.overlayCanvas.width = container.offsetWidth;
-            this.overlayCanvas.height = container.offsetHeight;
-          }
-          
-          this.fitToScreen();
-          this.render();
-          resolve(img);
-        };
-        img.onerror = () => {
-          reject(new Error('Failed to load image'));
-        };
-        img.src = e.target.result;
+        try {
+          const dataUrl = e.target.result;
+          const img = new Image();
+
+          img.onload = () => {
+            try {
+              this.currentImage = img;
+
+              console.log('Image loaded, dimensions:', {
+                width: img.width,
+                height: img.height
+              });
+
+              // Get container
+              const container = this.imageCanvas.parentElement;
+              if (!container) {
+                throw new Error('Canvas container not found');
+              }
+
+              const containerWidth = container.offsetWidth;
+              const containerHeight = container.offsetHeight;
+
+              console.log('Setting canvas to:', {
+                width: containerWidth,
+                height: containerHeight
+              });
+
+              // Set canvas dimensions
+              this.imageCanvas.width = containerWidth;
+              this.imageCanvas.height = containerHeight;
+              this.overlayCanvas.width = containerWidth;
+              this.overlayCanvas.height = containerHeight;
+
+              console.log('Canvas dimensions set:', {
+                imageCanvas: {
+                  width: this.imageCanvas.width,
+                  height: this.imageCanvas.height
+                },
+                overlayCanvas: {
+                  width: this.overlayCanvas.width,
+                  height: this.overlayCanvas.height
+                }
+              });
+
+              // Fit and render
+              this.fitToScreen();
+              this.render();
+
+              console.log('Image rendered successfully');
+              resolve(img);
+            } catch (err) {
+              console.error('Error during image setup:', err);
+              reject(err);
+            }
+          };
+
+          img.onerror = () => {
+            console.error('Image failed to load from data URL');
+            reject(new Error('Could not load image - file may be corrupted or unsupported'));
+          };
+
+          img.src = dataUrl;
+
+          // Timeout if image takes too long to load
+          setTimeout(() => {
+            if (!img.complete) {
+              reject(new Error('Image load timeout - try a smaller file'));
+            }
+          }, 10000);
+        } catch (err) {
+          console.error('Error in reader onload:', err);
+          reject(err);
+        }
       };
-      
-      reader.onerror = () => {
-        reject(new Error('Failed to read file'));
+
+      reader.onerror = (err) => {
+        console.error('FileReader error:', err);
+        reject(new Error('Could not read file - ensure it is a valid image'));
       };
-      reader.readAsDataURL(file);
+
+      reader.onprogress = (e) => {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        console.log(`Loading: ${percent}%`);
+      };
+
+      try {
+        reader.readAsDataURL(file);
+      } catch (err) {
+        console.error('Error starting file read:', err);
+        reject(new Error('Could not read file'));
+      }
     });
   }
 
