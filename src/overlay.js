@@ -19,6 +19,7 @@ export class Overlay {
     this.currentIconType = null;
     this.drawingRoute = null;
     this.drawingLine = null;
+    this.lastMousePos = { x: 0, y: 0 };
     this.history = new History();
 
     this.setupEventListeners();
@@ -43,7 +44,6 @@ export class Overlay {
     const pos = this.getMousePos(e);
 
     if (this.currentTool === 'select') {
-      // Find clicked element
       for (const icon of this.icons) {
         if (icon.contains(pos.x, pos.y)) {
           this.selectElement(icon);
@@ -70,7 +70,11 @@ export class Overlay {
       } else {
         this.drawingRoute.points.push(pos);
       }
+    } else if (this.currentTool === 'add-icon') {
+      this.addIcon(this.currentIconType, pos.x, pos.y);
     }
+
+    this.lastMousePos = pos;
   }
 
   onMouseMove(e) {
@@ -85,7 +89,6 @@ export class Overlay {
       }
       this.render();
     } else if (this.selectedElement && this.currentTool === 'select') {
-      // Allow dragging
       const dx = pos.x - this.lastMousePos.x;
       const dy = pos.y - this.lastMousePos.y;
       
@@ -101,7 +104,6 @@ export class Overlay {
 
   onMouseUp(e) {
     if (this.drawingLine) {
-      // Create line element
       this.drawingLine = null;
       this.render();
     }
@@ -111,7 +113,6 @@ export class Overlay {
     const pos = this.getMousePos(e);
 
     if (this.currentTool === 'draw-arrow' && this.drawingRoute) {
-      // Right click to finish route
       if (e.button === 2) {
         this.routes.push(this.drawingRoute);
         this.drawingRoute = null;
@@ -162,7 +163,6 @@ export class Overlay {
   setTool(tool) {
     this.currentTool = tool;
     
-    // Cancel current drawing
     if (tool !== 'draw-arrow') {
       this.drawingRoute = null;
     }
@@ -176,30 +176,18 @@ export class Overlay {
   setIconTool(iconType) {
     this.currentIconType = iconType;
     this.currentTool = 'add-icon';
-    
-    // Click on canvas to place icon
-    const tempHandler = (e) => {
-      const pos = this.getMousePos(e);
-      this.addIcon(iconType, pos.x, pos.y);
-      this.canvas.removeEventListener('click', tempHandler);
-    };
-
-    this.canvas.addEventListener('click', tempHandler);
   }
 
   render() {
     const width = this.canvas.width;
     const height = this.canvas.height;
 
-    // Clear canvas
     this.ctx.clearRect(0, 0, width, height);
 
-    // Draw routes first (background layer)
     for (const route of this.routes) {
       route.draw(this.ctx);
     }
 
-    // Draw lines
     if (this.drawingLine) {
       this.ctx.strokeStyle = '#999';
       this.ctx.lineWidth = 2;
@@ -211,12 +199,10 @@ export class Overlay {
       this.ctx.setLineDash([]);
     }
 
-    // Draw icons
     for (const icon of this.icons) {
       icon.draw(this.ctx);
     }
 
-    // Draw route being drawn
     if (this.drawingRoute) {
       this.drawingRoute.draw(this.ctx);
     }
@@ -244,7 +230,6 @@ export class Overlay {
   }
 
   dispatchSelection(element) {
-    // Dispatch custom event for UI updates
     const event = new CustomEvent('element-selected', { detail: element });
     window.dispatchEvent(event);
   }

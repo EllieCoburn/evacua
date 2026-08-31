@@ -23,15 +23,29 @@ export class ImageProcessor {
         const img = new Image();
         img.onload = () => {
           this.currentImage = img;
+          
+          // Force canvas resize
+          const container = this.imageCanvas.parentElement;
+          if (container) {
+            this.imageCanvas.width = container.offsetWidth;
+            this.imageCanvas.height = container.offsetHeight;
+            this.overlayCanvas.width = container.offsetWidth;
+            this.overlayCanvas.height = container.offsetHeight;
+          }
+          
           this.fitToScreen();
           this.render();
           resolve(img);
         };
-        img.onerror = reject;
+        img.onerror = () => {
+          reject(new Error('Failed to load image'));
+        };
         img.src = e.target.result;
       };
       
-      reader.onerror = reject;
+      reader.onerror = () => {
+        reject(new Error('Failed to read file'));
+      };
       reader.readAsDataURL(file);
     });
   }
@@ -39,8 +53,8 @@ export class ImageProcessor {
   fitToScreen() {
     if (!this.currentImage) return;
 
-    const containerWidth = this.imageCanvas.clientWidth;
-    const containerHeight = this.imageCanvas.clientHeight;
+    const containerWidth = this.imageCanvas.width;
+    const containerHeight = this.imageCanvas.height;
     
     const imgRatio = this.currentImage.width / this.currentImage.height;
     const containerRatio = containerWidth / containerHeight;
@@ -82,7 +96,6 @@ export class ImageProcessor {
 
     // Clear canvases
     this.imageCtx.clearRect(0, 0, width, height);
-    this.overlayCtx.clearRect(0, 0, width, height);
 
     // Draw image
     const scaledWidth = this.currentImage.width * this.zoom;
@@ -107,7 +120,7 @@ export class ImageProcessor {
     const width = this.imageCanvas.width;
     const height = this.imageCanvas.height;
 
-    this.imageCtx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
+    this.imageCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     this.imageCtx.lineWidth = 1;
 
     // Vertical lines
@@ -128,9 +141,6 @@ export class ImageProcessor {
   }
 
   canvasToImageCoords(canvasX, canvasY) {
-    const scaledWidth = this.currentImage.width * this.zoom;
-    const scaledHeight = this.currentImage.height * this.zoom;
-
     const imageX = (canvasX - this.panX) / this.zoom;
     const imageY = (canvasY - this.panY) / this.zoom;
 
