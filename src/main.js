@@ -3,6 +3,7 @@ import { Overlay } from './overlay.js';
 import { ICONS, preloadIcons } from './icon-library.js';
 import { cleanFloorPlan } from './plan-cleaner.js';
 import { vectorizeFloorPlan, renderVectorPlan, findWallAt } from './plan-vectorizer.js';
+import { vectorizeCV, renderCVPlan, findComponentAt, loadOpenCV } from './plan-vectorizer-cv.js';
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
@@ -37,6 +38,10 @@ function init() {
     state.overlay.render();
     console.log('Evacua initialized');
   });
+
+  // Warm up the vision engine in the background so the first upload
+  // reconstructs without waiting on the download
+  loadOpenCV().catch(err => console.warn('Vision engine preload failed:', err));
 }
 
 function setupCanvases() {
@@ -59,17 +64,31 @@ function setupCanvases() {
   state.overlay.onWallErase = (pos) => eraseWallAt(pos);
 }
 
-// Reconstruct the floor plan from the original upload and swap it in as the base
-function reconstructPlan({ silent = false } = {}) {
+// Reconstruct the floor plan from the original upload and swap it in as the
+// base. Uses the OpenCV vision engine, with the legacy scan-line extractor
+// as a fallback if the engine can't load.
+async function reconstructPlan({ silent = false } = {}) {
   if (!state.originalImage) {
     if (!silent) showToast('Upload a floor plan first', 'error');
     return false;
   }
 
-  const plan = vectorizeFloorPlan(state.originalImage, state.vectorOpts);
+  let plan = null;
+  try {
+    plan = await vectorizeCV(state.originalImage, state.vectorOpts);
+  } catch (err) {
+    console.warn('Vision engine unavailable, using fallback extractor:', err);
+  }
+
+  if (!plan || plan.wallCount < 2) {
+    const legacy = vectorizeFloorPlan(state.originalImage, state.vectorOpts);
+    const legacyPlan = { mode: 'legacy', ...legacy, wallCount: legacy.walls.length, windows: [] };
+    if (!plan || legacyPlan.wallCount > plan.wallCount) plan = legacyPlan;
+  }
+
   state.vectorPlan = plan;
 
-  if (plan.walls.length < 4) {
+  if (plan.wallCount < 2) {
     // Not enough structure found — keep the raster trace as the base
     updateVectorStats(plan, true);
     if (!silent) {
@@ -78,7 +97,7 @@ function reconstructPlan({ silent = false } = {}) {
     return false;
   }
 
-  state.cleanPlan = renderVectorPlan(plan);
+  state.cleanPlan = renderPlan(plan);
   state.view = 'clean';
   state.imageProcessor.currentImage = state.cleanPlan;
   state.imageProcessor.fitToScreen();
@@ -88,13 +107,20 @@ function reconstructPlan({ silent = false } = {}) {
   updateVectorStats(plan, false);
 
   if (!silent) {
-    showToast(
-      `Reconstructed ${plan.walls.length} walls` +
-      (plan.doors.length ? ` and ${plan.doors.length} door openings` : ''),
-      'success'
-    );
+    showToast(planSummary(plan), 'success');
   }
   return true;
+}
+
+function renderPlan(plan) {
+  return plan.mode === 'cv' ? renderCVPlan(plan) : renderVectorPlan(plan);
+}
+
+function planSummary(plan) {
+  const parts = [`Reconstructed ${plan.wallCount} wall sections`];
+  if (plan.doors?.length) parts.push(`${plan.doors.length} doors`);
+  if (plan.windows?.length) parts.push(`${plan.windows.length} windows`);
+  return parts.join(', ');
 }
 
 function updateVectorStats(plan, fellBack) {
@@ -103,9 +129,11 @@ function updateVectorStats(plan, fellBack) {
   if (!plan) {
     el.textContent = '';
   } else if (fellBack) {
-    el.textContent = `Found only ${plan.walls.length} wall segments — using the traced image as the base. Try lowering Minimum Wall Length.`;
+    el.textContent = `Found only ${plan.wallCount} wall sections — using the traced image as the base. Try lowering Minimum Wall Length.`;
   } else {
-    el.textContent = `${plan.walls.length} walls, ${plan.doors.length} door openings. Use the Wall Eraser to remove any false walls.`;
+    const engine = plan.mode === 'cv' ? 'Vision engine' : 'Fallback extractor';
+    el.textContent = `${engine}: ${plan.wallCount} wall sections, ${plan.doors?.length || 0} doors, ` +
+      `${plan.windows?.length || 0} windows. Use the Wall Eraser to remove any false walls.`;
   }
 }
 
@@ -113,17 +141,27 @@ function eraseWallAt(pos) {
   if (!state.vectorPlan) return;
 
   const { imageX, imageY } = state.imageProcessor.canvasToImageCoords(pos.x, pos.y);
-  const idx = findWallAt(state.vectorPlan, imageX, imageY);
-  if (idx === -1) return;
+  const plan = state.vectorPlan;
 
-  state.vectorPlan.walls.splice(idx, 1);
-  state.cleanPlan = renderVectorPlan(state.vectorPlan);
+  if (plan.mode === 'cv') {
+    const idx = findComponentAt(plan, imageX, imageY);
+    if (idx === -1) return;
+    plan.components.splice(idx, 1);
+    plan.wallCount = plan.components.length;
+  } else {
+    const idx = findWallAt(plan, imageX, imageY);
+    if (idx === -1) return;
+    plan.walls.splice(idx, 1);
+    plan.wallCount = plan.walls.length;
+  }
+
+  state.cleanPlan = renderPlan(plan);
   if (state.view === 'clean') {
     state.imageProcessor.currentImage = state.cleanPlan;
     state.imageProcessor.render();
     state.overlay.render();
   }
-  updateVectorStats(state.vectorPlan, false);
+  updateVectorStats(plan, false);
 }
 
 function setupPlanInfo() {
@@ -582,15 +620,10 @@ async function loadImage(file) {
 
       // Full vector reconstruction: extract wall geometry and redraw.
       // Every source converges to the same clean drafted output.
-      reconstructPlan({ silent: true });
+      await reconstructPlan({ silent: true });
 
-      if (state.vectorPlan && state.vectorPlan.walls.length >= 4) {
-        showToast(
-          `Reconstructed ${state.vectorPlan.walls.length} walls` +
-          (state.vectorPlan.doors.length ? ` and ${state.vectorPlan.doors.length} door openings` : '') +
-          ' — add your symbols, or refine in the Convert tab',
-          'success'
-        );
+      if (state.vectorPlan && state.vectorPlan.wallCount >= 2) {
+        showToast(planSummary(state.vectorPlan) + ' — add your symbols, or refine in the Convert tab', 'success');
       } else {
         showToast('Converted to a traced plan — for a full reconstruction, try the Convert tab', 'info');
       }
