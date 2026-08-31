@@ -26,6 +26,20 @@ export function renderPlanCanvas(plan) {
   }
 
   const t = plan.wallThickness || 8;
+
+  // Cut a white gap through the wall at every opening (matters for doors
+  // and windows the user adds onto solid walls; harmless for detected ones)
+  ctx.fillStyle = '#ffffff';
+  for (const opening of [...(plan.doors || []), ...(plan.windows || [])]) {
+    const half = opening.length / 2;
+    const cut = t * 0.75;
+    if (opening.o === 'h') {
+      ctx.fillRect(opening.x - half, opening.y - cut, opening.length, cut * 2);
+    } else {
+      ctx.fillRect(opening.x - cut, opening.y - half, cut * 2, opening.length);
+    }
+  }
+
   ctx.strokeStyle = '#1a1a1a';
 
   // Door swing arcs
@@ -97,6 +111,86 @@ export function renderTraceCanvas(trace) {
   }
   ctx.putImageData(out, 0, 0);
   return canvas;
+}
+
+// Hit-test doors and windows (their symbol regions) in plan coordinates
+export function findOpeningAt(plan, x, y) {
+  const t = plan.wallThickness || 8;
+  const lists = [
+    ['door', plan.doors || []],
+    ['window', plan.windows || []]
+  ];
+  for (const [kind, list] of lists) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const op = list[i];
+      const half = op.length / 2 + t;
+      // Doors include the swing arc area above/right of the opening
+      const reach = kind === 'door' ? op.length + t : t * 1.5;
+      let hit;
+      if (op.o === 'h') {
+        hit = Math.abs(x - op.x) <= half && y <= op.y + t && y >= op.y - reach;
+      } else {
+        hit = Math.abs(y - op.y) <= half && x >= op.x - t && x <= op.x + reach;
+      }
+      if (hit) return { kind, index: i };
+    }
+  }
+  return null;
+}
+
+// Add a straight wall to the model as a rectangle component
+export function addWallToPlan(plan, x1, y1, x2, y2) {
+  const t = Math.max(3, plan.wallThickness || 8);
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  if (len < t) return false;
+
+  // Snap to axis when near-straight, like the reconstruction does
+  if (Math.abs(y2 - y1) <= Math.max(3, Math.abs(x2 - x1) * 0.14)) {
+    y2 = y1;
+  } else if (Math.abs(x2 - x1) <= Math.max(3, Math.abs(y2 - y1) * 0.14)) {
+    x2 = x1;
+  }
+
+  const nx = -(y2 - y1) / len * (t / 2);
+  const ny = (x2 - x1) / len * (t / 2);
+  plan.components.push({
+    rings: [[
+      { x: x1 + nx, y: y1 + ny },
+      { x: x2 + nx, y: y2 + ny },
+      { x: x2 - nx, y: y2 - ny },
+      { x: x1 - nx, y: y1 - ny }
+    ]]
+  });
+  plan.wallCount = plan.components.length;
+  return true;
+}
+
+// Orientation of the nearest wall edge — used to align doors/windows the
+// user places onto a wall
+export function nearestWallOrientation(plan, x, y) {
+  let best = Infinity;
+  let orientation = 'h';
+  for (const comp of plan.components) {
+    for (const ring of comp.rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const a = ring[j], b = ring[i];
+        const d = distToSegment(x, y, a.x, a.y, b.x, b.y);
+        if (d < best) {
+          best = d;
+          orientation = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? 'h' : 'v';
+        }
+      }
+    }
+  }
+  return orientation;
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const C = x2 - x1, D = y2 - y1;
+  const lenSq = C * C + D * D;
+  let t = lenSq ? ((px - x1) * C + (py - y1) * D) / lenSq : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * C), py - (y1 + t * D));
 }
 
 // Hit-test in plan coordinates: which wall component contains this point?

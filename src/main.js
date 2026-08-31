@@ -2,7 +2,10 @@ import { ImageProcessor } from './image-processor.js';
 import { Overlay } from './overlay.js';
 import { ICONS, preloadIcons } from './icon-library.js';
 import { visionRequest, warmupVision, sourceToImageData } from './vision-client.js';
-import { renderPlanCanvas, renderTraceCanvas, findComponentAt } from './plan-render.js';
+import {
+  renderPlanCanvas, renderTraceCanvas, findComponentAt,
+  findOpeningAt, addWallToPlan, nearestWallOrientation
+} from './plan-render.js';
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
@@ -227,19 +230,21 @@ function eraseWallAt(pos) {
   if (!plan || !plan.components) return;
 
   const { imageX, imageY } = state.imageProcessor.canvasToImageCoords(pos.x, pos.y);
+
+  // Doors/windows are smaller targets — check them before walls
+  const opening = findOpeningAt(plan, imageX, imageY);
+  if (opening) {
+    (opening.kind === 'door' ? plan.doors : plan.windows).splice(opening.index, 1);
+    refreshPlanCanvas();
+    return;
+  }
+
   const idx = findComponentAt(plan, imageX, imageY);
   if (idx === -1) return;
 
   plan.components.splice(idx, 1);
   plan.wallCount = plan.components.length;
-
-  state.cleanPlan = renderPlanCanvas(plan);
-  if (state.view === 'clean') {
-    state.imageProcessor.currentImage = state.cleanPlan;
-    state.imageProcessor.render();
-    state.overlay.render();
-  }
-  updateVectorStats(plan, false);
+  refreshPlanCanvas();
 }
 
 function setupPlanInfo() {
@@ -276,7 +281,6 @@ function setupConvertControls() {
   const vectorizeBtn = document.getElementById('vectorize-btn');
   const minWallSlider = document.getElementById('minwall-slider');
   const bridgeSlider = document.getElementById('bridge-slider');
-  const wallEraserBtn = document.getElementById('wall-eraser-btn');
 
   vectorizeBtn.addEventListener('click', () => {
     showToast('Analyzing floor plan structure...', 'info');
@@ -301,24 +305,134 @@ function setupConvertControls() {
     if (state.vectorPlan) reconstructPlan({ silent: true });
   });
 
-  wallEraserBtn.addEventListener('click', () => {
-    const activating = !wallEraserBtn.classList.contains('active');
-    document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
-    wallEraserBtn.classList.toggle('active', activating);
+  // ---- Plan editing tools: walls, doors, windows, scale ----
 
-    if (activating) {
-      state.overlay.setTool('erase-wall');
-      showToast('Wall Eraser: click any wall on the map to remove it', 'info');
-    } else {
-      state.overlay.setTool('select');
+  const PLAN_TOOL_HINTS = {
+    wall: 'Add Wall: drag on the map to draw a wall (near-straight lines snap)',
+    door: 'Add Door: click on a wall to place a door',
+    window: 'Add Window: click on a wall to place a window',
+    erase: 'Erase: click any wall, door, or window to remove it',
+    scale: 'Set Scale: click two points a known distance apart',
+  };
+
+  document.querySelectorAll('.plan-tool').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tool = btn.dataset.planTool;
+      const activating = !btn.classList.contains('active');
+
+      document.querySelectorAll('[data-tool], .icon-btn, .plan-tool').forEach(b => b.classList.remove('active'));
+
+      if (!activating) {
+        state.activePlanTool = null;
+        state.overlay.setTool('select');
+        return;
+      }
+
+      if (tool !== 'scale' && (!state.vectorPlan || !state.vectorPlan.components)) {
+        showToast('Reconstruct a floor plan first', 'error');
+        return;
+      }
+      if (!state.originalImage) {
+        showToast('Upload a floor plan first', 'error');
+        return;
+      }
+
+      btn.classList.add('active');
+      state.activePlanTool = tool;
+      state.scaleDraft = null;
+
+      if (tool === 'wall') state.overlay.setTool('add-plan-wall');
+      else if (tool === 'erase') state.overlay.setTool('erase-wall');
+      else state.overlay.setTool('plan-click');
+
+      showToast(PLAN_TOOL_HINTS[tool], 'info');
+    });
+  });
+
+  // Leaving plan-tool mode via any other tool clears the highlights
+  window.addEventListener('tool-changed', (e) => {
+    if (!['erase-wall', 'add-plan-wall', 'plan-click'].includes(e.detail)) {
+      document.querySelectorAll('.plan-tool').forEach(b => b.classList.remove('active'));
+      state.activePlanTool = null;
     }
   });
 
-  // Leaving wall-eraser mode via any other tool clears its highlight
-  window.addEventListener('tool-changed', (e) => {
-    if (e.detail !== 'erase-wall') wallEraserBtn.classList.remove('active');
-  });
+  state.overlay.onPlanWallAdd = (start, end) => {
+    const plan = state.vectorPlan;
+    if (!plan || !plan.components) return;
+    const a = state.imageProcessor.canvasToImageCoords(start.x, start.y);
+    const b = state.imageProcessor.canvasToImageCoords(end.x, end.y);
+    if (addWallToPlan(plan, a.imageX, a.imageY, b.imageX, b.imageY)) {
+      refreshPlanCanvas();
+    }
+  };
+
+  state.overlay.onPlanClick = (pos) => {
+    const { imageX, imageY } = state.imageProcessor.canvasToImageCoords(pos.x, pos.y);
+
+    if (state.activePlanTool === 'scale') {
+      handleScaleClick(imageX, imageY);
+      return;
+    }
+
+    const plan = state.vectorPlan;
+    if (!plan || !plan.components) return;
+
+    if (state.activePlanTool === 'door' || state.activePlanTool === 'window') {
+      const o = nearestWallOrientation(plan, imageX, imageY);
+      const t = plan.wallThickness || 8;
+      const opening = { x: imageX, y: imageY, length: t * 4, o };
+      if (state.activePlanTool === 'door') plan.doors.push(opening);
+      else plan.windows.push(opening);
+      refreshPlanCanvas();
+      showToast(`${state.activePlanTool === 'door' ? 'Door' : 'Window'} added — erase and re-place to adjust`, 'success');
+    }
+  };
+}
+
+function handleScaleClick(imageX, imageY) {
+  if (!state.scaleDraft) {
+    state.scaleDraft = { x: imageX, y: imageY };
+    showToast('Now click the second point', 'info');
+    return;
+  }
+
+  const distPx = Math.hypot(imageX - state.scaleDraft.x, imageY - state.scaleDraft.y);
+  state.scaleDraft = null;
+  if (distPx < 4) {
+    showToast('Points are too close together — try again', 'error');
+    return;
+  }
+
+  const answer = window.prompt('Real-world distance between the two points (e.g. "10 ft" or "3 m"):', '10 ft');
+  if (!answer) return;
+
+  const match = answer.trim().match(/^([\d.]+)\s*([a-zA-Z]*)$/);
+  const value = match ? parseFloat(match[1]) : NaN;
+  if (!match || !isFinite(value) || value <= 0) {
+    showToast('Could not read that distance — use a format like "10 ft"', 'error');
+    return;
+  }
+
+  state.planInfo.scale = {
+    pixelsPerUnit: distPx / value,
+    unit: match[2] || 'ft'
+  };
+  state.overlay.render();
+  showToast(`Scale set: a scale bar now appears on the plan (${answer.trim()})`, 'success');
+}
+
+// Re-render the base plan canvas after a model edit
+function refreshPlanCanvas() {
+  const plan = state.vectorPlan;
+  if (!plan) return;
+  state.cleanPlan = renderPlanCanvas(plan);
+  if (state.view === 'clean') {
+    state.imageProcessor.currentImage = state.cleanPlan;
+    state.imageProcessor.render();
+    state.overlay.render();
+  }
+  updateVectorStats(plan, false);
 }
 
 function setupEventListeners() {
@@ -542,7 +656,7 @@ function setupToolButtons() {
 
       document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById('wall-eraser-btn')?.classList.remove('active');
+      document.querySelectorAll('.plan-tool').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
       state.overlay.setTool(tool);
@@ -575,7 +689,7 @@ function buildIconPalette() {
 
     btn.addEventListener('click', () => {
       document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById('wall-eraser-btn')?.classList.remove('active');
+      document.querySelectorAll('.plan-tool').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
       if (icon.isRoute) {

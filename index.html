@@ -94,10 +94,33 @@
             <span id="bridge-value" style="font-size: 11px; color: var(--c-fg-muted);">5px — joins broken lines; keep low to preserve doorways</span>
           </label>
 
-          <button class="tool-btn" id="wall-eraser-btn" style="width: 100%; margin-top: 4px;"
-                  title="Click any reconstructed wall on the map to remove it">
-            <i data-ico="erase"></i> Wall Eraser
-          </button>
+          <h3 style="margin-top: 16px;">Edit the Plan</h3>
+          <p style="font-size: 12px; color: var(--c-fg-muted); margin-bottom: 8px;">
+            Walls, doors, and windows are editable objects — fix anything the
+            reconstruction missed.
+          </p>
+          <div class="drawing-tools">
+            <button class="tool-btn plan-tool" id="plan-add-wall-btn" data-plan-tool="wall"
+                    title="Drag on the map to add a wall">
+              <i data-ico="line"></i> Add Wall
+            </button>
+            <button class="tool-btn plan-tool" id="plan-add-door-btn" data-plan-tool="door"
+                    title="Click a wall on the map to place a door">
+              <i data-ico="select"></i> Add Door
+            </button>
+            <button class="tool-btn plan-tool" id="plan-add-window-btn" data-plan-tool="window"
+                    title="Click a wall on the map to place a window">
+              <i data-ico="select"></i> Add Window
+            </button>
+            <button class="tool-btn plan-tool" id="wall-eraser-btn" data-plan-tool="erase"
+                    title="Click any wall, door, or window on the map to remove it">
+              <i data-ico="erase"></i> Erase Wall / Door / Window
+            </button>
+            <button class="tool-btn plan-tool" id="plan-scale-btn" data-plan-tool="scale"
+                    title="Click two points a known distance apart, then enter the real distance">
+              <i data-ico="measure"></i> Set Scale
+            </button>
+          </div>
 
           <div id="vector-stats" style="font-size: 11px; color: var(--c-fg-muted); margin-top: 12px;"></div>
         </div>

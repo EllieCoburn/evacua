@@ -20,6 +20,7 @@ export class Overlay {
     this.drawingRoute = null;
     this.drawingLine = null;   // {start, end} preview for line tool
     this.drawingArrow = null;  // {start, end} preview for arrow tool
+    this.planWallDraft = null; // {start, end} preview for add-plan-wall
     this.lastMousePos = { x: 0, y: 0 };
     this.isDragging = false;
     this.isResizing = false;
@@ -140,6 +141,12 @@ export class Overlay {
     } else if (this.currentTool === 'erase-wall') {
       // Handled by the app, which owns the reconstructed wall geometry
       if (this.onWallErase) this.onWallErase(pos);
+    } else if (this.currentTool === 'add-plan-wall') {
+      this.planWallDraft = { start: pos, end: pos };
+    } else if (this.currentTool === 'plan-click') {
+      // Generic single-click plan tool (add door/window, set scale) —
+      // the app decides what the click means
+      if (this.onPlanClick) this.onPlanClick(pos);
     } else if (this.currentTool === 'text') {
       const text = window.prompt('Label text:', '');
       if (text && text.trim()) {
@@ -183,7 +190,10 @@ export class Overlay {
   onMouseMove(e) {
     const pos = this.getMousePos(e);
 
-    if (this.drawingLine) {
+    if (this.planWallDraft) {
+      this.planWallDraft.end = pos;
+      this.render();
+    } else if (this.drawingLine) {
       this.drawingLine.end = pos;
       this.render();
     } else if (this.drawingArrow) {
@@ -225,6 +235,15 @@ export class Overlay {
   onMouseUp(e) {
     this.isDragging = false;
     this.isResizing = false;
+
+    if (this.planWallDraft) {
+      const { start, end } = this.planWallDraft;
+      this.planWallDraft = null;
+      if (Math.hypot(end.x - start.x, end.y - start.y) > 6 && this.onPlanWallAdd) {
+        this.onPlanWallAdd(start, end);
+      }
+      this.render();
+    }
 
     if (this.drawingLine) {
       const { start, end } = this.drawingLine;
@@ -274,7 +293,7 @@ export class Overlay {
   }
 
   updateCursor(pos) {
-    const drawTools = ['add-icon', 'draw-arrow', 'draw-line', 'arrow', 'text'];
+    const drawTools = ['add-icon', 'draw-arrow', 'draw-line', 'arrow', 'text', 'add-plan-wall', 'plan-click'];
     let cursor = 'default';
     if (drawTools.includes(this.currentTool)) {
       cursor = 'crosshair';
@@ -353,6 +372,7 @@ export class Overlay {
     }
     this.drawingLine = null;
     this.drawingArrow = null;
+    this.planWallDraft = null;
     this.isDragging = false;
     this.isResizing = false;
 
@@ -366,6 +386,7 @@ export class Overlay {
     }
     this.drawingLine = null;
     this.drawingArrow = null;
+    this.planWallDraft = null;
     this.isDragging = false;
     this.isResizing = false;
 
@@ -388,6 +409,18 @@ export class Overlay {
     }
 
     // Live previews while drawing
+    if (this.planWallDraft) {
+      this.ctx.strokeStyle = '#1a1a1a';
+      this.ctx.lineWidth = 8;
+      this.ctx.lineCap = 'square';
+      this.ctx.globalAlpha = 0.55;
+      this.ctx.beginPath();
+      this.ctx.moveTo(this.planWallDraft.start.x, this.planWallDraft.start.y);
+      this.ctx.lineTo(this.planWallDraft.end.x, this.planWallDraft.end.y);
+      this.ctx.stroke();
+      this.ctx.globalAlpha = 1;
+    }
+
     if (this.drawingLine) {
       this.ctx.strokeStyle = '#1a1a1a';
       this.ctx.lineWidth = 4;
@@ -578,6 +611,48 @@ export class Overlay {
         ctx.fillStyle = '#c8102e';
         ctx.font = 'bold 13px Arial, sans-serif';
         ctx.fillText(f2, cx, fy + 9, boxW - 16);
+      }
+    }
+
+    // --- Scale bar, bottom right (after Set Scale calibration) ---
+    const scaleInfo = info.scale;
+    if (scaleInfo && scaleInfo.pixelsPerUnit > 0) {
+      const zoom = this.imageProcessor.zoom || 1;
+      const screenPxPerUnit = scaleInfo.pixelsPerUnit * zoom;
+
+      // Pick a round length (1/2/5 × 10^k units) that renders ~90px wide
+      const raw = 90 / screenPxPerUnit;
+      const pow = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-6))));
+      let unitLen = 10 * pow;
+      for (const m of [1, 2, 5, 10]) {
+        if (m * pow >= raw) { unitLen = m * pow; break; }
+      }
+      const barPx = unitLen * screenPxPerUnit;
+
+      if (barPx >= 20 && barPx <= w * 0.5) {
+        const bx = w - barPx - 24;
+        const by = h - 30;
+
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.fillRect(bx - 10, by - 14, barPx + 20, 36);
+
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx + barPx, by);
+        ctx.moveTo(bx, by - 5);
+        ctx.lineTo(bx, by + 5);
+        ctx.moveTo(bx + barPx, by - 5);
+        ctx.lineTo(bx + barPx, by + 5);
+        ctx.stroke();
+
+        ctx.fillStyle = '#1a1a1a';
+        ctx.font = 'bold 11px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        const num = unitLen >= 1 ? Math.round(unitLen) : unitLen;
+        ctx.fillText(`${num} ${scaleInfo.unit}`, bx + barPx / 2, by + 6);
       }
     }
 
