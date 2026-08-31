@@ -1,7 +1,7 @@
 import { ImageProcessor } from './image-processor.js';
 import { Overlay } from './overlay.js';
 import { WallDetector } from './wall-detector.js';
-import { ICONS, preloadIcons, getIconImage } from './icon-library.js';
+import { ICONS, preloadIcons } from './icon-library.js';
 import { cleanFloorPlan } from './plan-cleaner.js';
 
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -15,6 +15,14 @@ const state = {
   originalImage: null,   // what the user uploaded (Image)
   cleanPlan: null,       // auto-converted outline (canvas)
   view: 'clean',
+  planInfo: {
+    title: 'EMERGENCY EVACUATION PLAN',
+    address: '',
+    floor: '',
+    footer1: 'IN CASE OF FIRE USE STAIRS — DO NOT USE ELEVATOR',
+    footer2: 'IN CASE OF EMERGENCY DIAL 911',
+    show: true,
+  },
 };
 
 function init() {
@@ -22,6 +30,7 @@ function init() {
   setupEventListeners();
   setupToolButtons();
   setupDetectionControls();
+  setupPlanInfo();
 
   preloadIcons().then(() => {
     buildIconPalette();
@@ -46,7 +55,38 @@ function setupCanvases() {
 
   state.imageProcessor = new ImageProcessor(imageCanvas, overlayCanvas);
   state.overlay = new Overlay(overlayCanvas, state.imageProcessor);
+  state.overlay.planInfo = state.planInfo;
   state.wallDetector = new WallDetector(state.imageProcessor);
+}
+
+function setupPlanInfo() {
+  const fields = [
+    ['plan-title', 'title'],
+    ['plan-address', 'address'],
+    ['plan-floor', 'floor'],
+    ['plan-footer1', 'footer1'],
+    ['plan-footer2', 'footer2'],
+  ];
+
+  for (const [id, key] of fields) {
+    const input = document.getElementById(id);
+    if (!input) continue;
+    // Seed defaults from the HTML values
+    state.planInfo[key] = input.value;
+    input.addEventListener('input', () => {
+      state.planInfo[key] = input.value;
+      state.overlay.render();
+    });
+  }
+
+  const frameToggle = document.getElementById('opt-frame');
+  if (frameToggle) {
+    state.planInfo.show = frameToggle.checked;
+    frameToggle.addEventListener('change', () => {
+      state.planInfo.show = frameToggle.checked;
+      state.overlay.render();
+    });
+  }
 }
 
 function setupDetectionControls() {
@@ -576,90 +616,15 @@ function exportPlan() {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(imageCanvas, 0, 0);
+  // Overlay already includes annotations, title block, legend, and footer
   ctx.drawImage(overlayCanvas, 0, 0);
-
-  drawLegend(ctx, out.width, out.height);
 
   const link = document.createElement('a');
   link.href = out.toDataURL('image/png');
   link.download = `evacuation-plan-${Date.now()}.png`;
   link.click();
 
-  showToast('Plan exported as PNG with legend', 'success');
-}
-
-// Auto-generated legend of the symbols actually used on this plan,
-// like the legend block on professional evacuation signage
-function drawLegend(ctx, canvasW, canvasH) {
-  const used = new Map();
-  for (const ic of state.overlay.icons) {
-    if (ICONS[ic.type]) used.set(ic.type, ICONS[ic.type]);
-  }
-  for (const rt of state.overlay.routes) {
-    if (ICONS[rt.type]) used.set(rt.type, ICONS[rt.type]);
-  }
-  if (used.size === 0) return;
-
-  const rowH = 28;
-  const pad = 12;
-  const titleH = 24;
-  const boxW = 200;
-  const boxH = titleH + used.size * rowH + pad;
-  const x = 16;
-  const y = canvasH - boxH - 16;
-
-  ctx.save();
-
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.lineWidth = 2;
-  ctx.fillRect(x, y, boxW, boxH);
-  ctx.strokeRect(x, y, boxW, boxH);
-
-  ctx.fillStyle = '#1a1a1a';
-  ctx.font = 'bold 13px Arial, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('LEGEND', x + pad, y + titleH / 2 + 4);
-  ctx.beginPath();
-  ctx.moveTo(x + pad, y + titleH);
-  ctx.lineTo(x + boxW - pad, y + titleH);
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  let rowY = y + titleH + rowH / 2;
-  for (const [type, icon] of used) {
-    if (icon.isRoute) {
-      // Line sample with arrowhead
-      ctx.strokeStyle = icon.color;
-      ctx.lineWidth = 3;
-      ctx.setLineDash(icon.dash && icon.dash.length ? [7, 5] : []);
-      ctx.beginPath();
-      ctx.moveTo(x + pad, rowY);
-      ctx.lineTo(x + pad + 22, rowY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = icon.color;
-      ctx.beginPath();
-      ctx.moveTo(x + pad + 30, rowY);
-      ctx.lineTo(x + pad + 21, rowY - 5);
-      ctx.lineTo(x + pad + 21, rowY + 5);
-      ctx.closePath();
-      ctx.fill();
-    } else {
-      const img = getIconImage(type);
-      if (img && img.complete && img.naturalWidth > 0) {
-        ctx.drawImage(img, x + pad + 2, rowY - 11, 22, 22);
-      }
-    }
-
-    ctx.fillStyle = '#1a1a1a';
-    ctx.font = '12px Arial, sans-serif';
-    ctx.fillText(icon.name.toUpperCase(), x + pad + 38, rowY + 1);
-    rowY += rowH;
-  }
-
-  ctx.restore();
+  showToast('Plan exported as PNG', 'success');
 }
 
 function showTab(tab, panel) {

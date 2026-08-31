@@ -196,6 +196,32 @@ header.topbar {
   box-shadow: 0 0 0 2px var(--c-primary);
 }
 
+/* Plan Info fields */
+.plan-field {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.plan-field input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-size: 12px;
+}
+
+.plan-field input:focus {
+  outline: none;
+  border-color: var(--c-primary);
+}
+
 /* Drawing Tools */
 .drawing-tools {
   display: flex;

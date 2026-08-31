@@ -151,41 +151,47 @@
       </div>
     </main>
 
-    <!-- Right Panel: Layers/History -->
+    <!-- Right Panel: Plan Info -->
     <aside class="panel right">
       <div class="panel-tabs">
-        <button class="tab-btn active" data-tab="layers">Layers</button>
-        <button class="tab-btn" data-tab="history">History</button>
+        <button class="tab-btn active" data-tab="plan">Plan Info</button>
         <button class="tab-btn" data-tab="settings">Settings</button>
       </div>
 
-      <div class="tab-content active" id="tab-layers">
-        <h3>Layers</h3>
-        <div id="layers-list">
-          <p style="color: var(--c-fg-muted); font-size: 12px;">Upload a plan to start</p>
-        </div>
-      </div>
+      <div class="tab-content active" id="tab-plan">
+        <h3>Plan Details</h3>
+        <p style="font-size: 12px; color: var(--c-fg-muted); margin-bottom: 12px;">
+          Shown on the map as the title block and instructions. The legend
+          updates automatically as you add symbols.
+        </p>
 
-      <div class="tab-content" id="tab-history">
-        <h3>History</h3>
-        <div id="history-list">
-          <p style="color: var(--c-fg-muted); font-size: 12px;">No history yet</p>
-        </div>
+        <label class="plan-field">
+          <span>Title</span>
+          <input type="text" id="plan-title" value="EMERGENCY EVACUATION PLAN">
+        </label>
+        <label class="plan-field">
+          <span>Address</span>
+          <input type="text" id="plan-address" placeholder="e.g. 321 North Orange Street">
+        </label>
+        <label class="plan-field">
+          <span>Floor / Area</span>
+          <input type="text" id="plan-floor" placeholder="e.g. Second Floor">
+        </label>
+        <label class="plan-field">
+          <span>Instruction Line 1</span>
+          <input type="text" id="plan-footer1" value="IN CASE OF FIRE USE STAIRS — DO NOT USE ELEVATOR">
+        </label>
+        <label class="plan-field">
+          <span>Instruction Line 2</span>
+          <input type="text" id="plan-footer2" value="IN CASE OF EMERGENCY DIAL 911">
+        </label>
       </div>
 
       <div class="tab-content" id="tab-settings">
         <h3>Settings</h3>
         <label class="checkbox">
-          <input type="checkbox" id="opt-grid" checked>
-          <span>Show Grid</span>
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="opt-snap" checked>
-          <span>Snap to Grid</span>
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="opt-dims" checked>
-          <span>Show Dimensions</span>
+          <input type="checkbox" id="opt-frame" checked>
+          <span>Show title, legend &amp; instructions on map</span>
         </label>
       </div>
     </aside>

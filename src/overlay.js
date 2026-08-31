@@ -1,6 +1,6 @@
 // Overlay management - handles icons, routes, and annotations
 
-import { IconElement, RouteElement, ICONS } from './icon-library.js';
+import { IconElement, RouteElement, ICONS, getIconImage } from './icon-library.js';
 import { History } from './history.js';
 
 export class Overlay {
@@ -22,6 +22,7 @@ export class Overlay {
     this.lastMousePos = { x: 0, y: 0 };
     this.isDragging = false;
     this.isResizing = false;
+    this.planInfo = null; // { title, address, floor, footer1, footer2, show }
     this.history = new History();
 
     this.setupEventListeners();
@@ -324,6 +325,171 @@ export class Overlay {
     if (this.drawingRoute) {
       this.drawingRoute.draw(this.ctx);
     }
+
+    this.drawPlanFrame();
+  }
+
+  // Title block, auto-updating legend, and instruction footer — the parts
+  // that make this read as a real evacuation plan. Drawn on the overlay so
+  // they update live and are included in exports automatically.
+  drawPlanFrame() {
+    const info = this.planInfo;
+    if (!info || !info.show) return;
+    if (!this.imageProcessor.currentImage) return;
+
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+
+    ctx.save();
+
+    // --- Title block, top center ---
+    const title = (info.title || '').trim();
+    const subtitle = [info.address, info.floor]
+      .map(s => (s || '').trim())
+      .filter(Boolean)
+      .join('  •  ');
+
+    if (title || subtitle) {
+      ctx.font = 'bold 20px Arial, sans-serif';
+      const titleW = title ? ctx.measureText(title).width : 0;
+      ctx.font = '13px Arial, sans-serif';
+      const subW = subtitle ? ctx.measureText(subtitle).width : 0;
+
+      const boxW = Math.min(w - 24, Math.max(titleW, subW) + 48);
+      const boxH = 16 + (title ? 26 : 0) + (subtitle ? 20 : 0);
+      const bx = (w - boxW) / 2;
+      const by = 10;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 2;
+      ctx.fillRect(bx, by, boxW, boxH);
+      ctx.strokeRect(bx, by, boxW, boxH);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      let ty = by + 8;
+      if (title) {
+        ctx.fillStyle = '#1a1a1a';
+        ctx.font = 'bold 20px Arial, sans-serif';
+        ctx.fillText(title, w / 2, ty + 13, boxW - 20);
+        ty += 26;
+      }
+      if (subtitle) {
+        ctx.fillStyle = '#444444';
+        ctx.font = '13px Arial, sans-serif';
+        ctx.fillText(subtitle, w / 2, ty + 10, boxW - 20);
+      }
+    }
+
+    // --- Legend, bottom left: automatically lists every symbol in use ---
+    const used = new Map();
+    for (const rt of this.routes) {
+      if (ICONS[rt.type]) used.set(rt.type, ICONS[rt.type]);
+    }
+    for (const ic of this.icons) {
+      if (ICONS[ic.type]) used.set(ic.type, ICONS[ic.type]);
+    }
+
+    if (used.size > 0) {
+      const rowH = 26;
+      const pad = 12;
+      const titleH = 24;
+      const boxW = 200;
+      const boxH = titleH + used.size * rowH + pad - 4;
+      const x = 12;
+      const y = h - boxH - 12;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 2;
+      ctx.fillRect(x, y, boxW, boxH);
+      ctx.strokeRect(x, y, boxW, boxH);
+
+      ctx.fillStyle = '#1a1a1a';
+      ctx.font = 'bold 12px Arial, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('LEGEND', x + pad, y + titleH / 2 + 3);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + pad, y + titleH - 2);
+      ctx.lineTo(x + boxW - pad, y + titleH - 2);
+      ctx.stroke();
+
+      let rowY = y + titleH + rowH / 2 - 2;
+      for (const [type, icon] of used) {
+        if (icon.isRoute) {
+          ctx.strokeStyle = icon.color;
+          ctx.lineWidth = 3;
+          ctx.setLineDash(icon.dash && icon.dash.length ? [7, 5] : []);
+          ctx.beginPath();
+          ctx.moveTo(x + pad, rowY);
+          ctx.lineTo(x + pad + 20, rowY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = icon.color;
+          ctx.beginPath();
+          ctx.moveTo(x + pad + 28, rowY);
+          ctx.lineTo(x + pad + 19, rowY - 5);
+          ctx.lineTo(x + pad + 19, rowY + 5);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          const img = getIconImage(type);
+          if (img && img.complete && img.naturalWidth > 0) {
+            ctx.drawImage(img, x + pad + 3, rowY - 10, 20, 20);
+          }
+        }
+
+        ctx.fillStyle = '#1a1a1a';
+        ctx.font = '11px Arial, sans-serif';
+        ctx.fillText(icon.name.toUpperCase(), x + pad + 36, rowY, boxW - pad * 2 - 36);
+        rowY += rowH;
+      }
+    }
+
+    // --- Instruction footer, bottom center ---
+    const f1 = (info.footer1 || '').trim();
+    const f2 = (info.footer2 || '').trim();
+
+    if (f1 || f2) {
+      ctx.font = 'bold 14px Arial, sans-serif';
+      const f1W = f1 ? ctx.measureText(f1).width : 0;
+      ctx.font = 'bold 13px Arial, sans-serif';
+      const f2W = f2 ? ctx.measureText(f2).width : 0;
+
+      const boxW = Math.min(w - 24, Math.max(f1W, f2W) + 40);
+      const boxH = 12 + (f1 ? 20 : 0) + (f2 ? 19 : 0);
+      // Keep clear of the legend in the bottom-left corner
+      const bx = Math.max((w - boxW) / 2, 224);
+      const by = h - boxH - 12;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 2;
+      ctx.fillRect(bx, by, boxW, boxH);
+      ctx.strokeRect(bx, by, boxW, boxH);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      let fy = by + 6;
+      const cx = bx + boxW / 2;
+      if (f1) {
+        ctx.fillStyle = '#1a1a1a';
+        ctx.font = 'bold 14px Arial, sans-serif';
+        ctx.fillText(f1, cx, fy + 10, boxW - 16);
+        fy += 20;
+      }
+      if (f2) {
+        ctx.fillStyle = '#c8102e';
+        ctx.font = 'bold 13px Arial, sans-serif';
+        ctx.fillText(f2, cx, fy + 9, boxW - 16);
+      }
+    }
+
+    ctx.restore();
   }
 
   undo() {
