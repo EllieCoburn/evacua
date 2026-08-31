@@ -354,7 +354,7 @@ function buildIconPalette() {
       if (icon.isRoute) {
         state.overlay.currentIconType = key;
         state.overlay.setTool('draw-arrow');
-        showToast(`Click points along the ${icon.name.toLowerCase()}, double-click to finish`, 'info');
+        showToast(`${icon.name}: click each turn of the path, double-click (or Enter) to finish, Esc to cancel`, 'info');
       } else {
         state.overlay.setIconTool(key);
         showToast(`Click the map to place: ${icon.name}`, 'info');

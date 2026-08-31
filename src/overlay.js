@@ -35,11 +35,48 @@ export class Overlay {
     this.canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.drawingRoute) {
-        this.drawingRoute = null;
-        this.render();
+      if (this.drawingRoute) {
+        if (e.key === 'Escape') {
+          // Cancel the in-progress route and leave drawing mode
+          this.finishRoute(false);
+          this.exitToSelect();
+        } else if (e.key === 'Enter') {
+          // Commit the route and leave drawing mode
+          e.preventDefault();
+          this.finishRoute(true);
+          this.exitToSelect();
+        }
       }
     });
+  }
+
+  // Close out the in-progress route. commit=true keeps it, false discards it.
+  finishRoute(commit) {
+    if (!this.drawingRoute) return;
+
+    const pts = this.drawingRoute.points;
+    pts.pop(); // remove the live preview point
+    // Drop trailing near-duplicate points (e.g. from a double-click)
+    while (pts.length > 1) {
+      const a = pts[pts.length - 1];
+      const b = pts[pts.length - 2];
+      if (Math.hypot(a.x - b.x, a.y - b.y) < 4) {
+        pts.pop();
+      } else {
+        break;
+      }
+    }
+
+    if (commit && pts.length >= 2) {
+      this.routes.push(this.drawingRoute);
+    }
+    this.drawingRoute = null;
+    this.render();
+  }
+
+  exitToSelect() {
+    this.currentTool = 'select';
+    this.dispatchToolChange('select');
   }
 
   onHandle(pos) {
@@ -116,7 +153,7 @@ export class Overlay {
     if (this.drawingLine) {
       this.drawingLine.end = pos;
       this.render();
-    } else if (this.drawingRoute) {
+    } else if (this.drawingRoute && this.currentTool === 'draw-arrow') {
       if (this.drawingRoute.points.length > 0) {
         this.drawingRoute.points[this.drawingRoute.points.length - 1] = pos;
       }
@@ -187,25 +224,10 @@ export class Overlay {
 
   onDoubleClick(e) {
     if (this.currentTool === 'draw-arrow' && this.drawingRoute) {
-      // Drop the live preview point, then any duplicates left by the
-      // double-click's own mousedown events
-      const pts = this.drawingRoute.points;
-      pts.pop();
-      while (pts.length > 1) {
-        const a = pts[pts.length - 1];
-        const b = pts[pts.length - 2];
-        if (Math.hypot(a.x - b.x, a.y - b.y) < 4) {
-          pts.pop();
-        } else {
-          break;
-        }
-      }
-
-      if (pts.length >= 2) {
-        this.routes.push(this.drawingRoute);
-      }
-      this.drawingRoute = null;
-      this.render();
+      // Finish the route AND leave drawing mode — the next click selects,
+      // it does not start another route
+      this.finishRoute(true);
+      this.exitToSelect();
     }
   }
 
@@ -249,19 +271,27 @@ export class Overlay {
   }
 
   setTool(tool) {
-    this.currentTool = tool;
-    
-    if (tool !== 'draw-arrow') {
-      this.drawingRoute = null;
+    // Changing tools always closes out an in-progress route: what you drew
+    // is kept (if it has at least two points), and drawing mode ends
+    if (this.drawingRoute) {
+      this.finishRoute(true);
     }
-    if (tool !== 'draw-line') {
-      this.drawingLine = null;
-    }
+    this.drawingLine = null;
+    this.isDragging = false;
+    this.isResizing = false;
 
+    this.currentTool = tool;
     this.render();
   }
 
   setIconTool(iconType) {
+    if (this.drawingRoute) {
+      this.finishRoute(true);
+    }
+    this.drawingLine = null;
+    this.isDragging = false;
+    this.isResizing = false;
+
     this.currentIconType = iconType;
     this.currentTool = 'add-icon';
   }
