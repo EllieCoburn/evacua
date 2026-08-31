@@ -2,6 +2,9 @@ import { ImageProcessor } from './image-processor.js';
 import { Overlay } from './overlay.js';
 import { WallDetector } from './wall-detector.js';
 import { ICONS, preloadIcons, getIconImage } from './icon-library.js';
+import { cleanFloorPlan } from './plan-cleaner.js';
+
+const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const state = {
   imageProcessor: null,
@@ -9,6 +12,9 @@ const state = {
   wallDetector: null,
   currentPlan: null,
   showDetection: false,
+  originalImage: null,   // what the user uploaded (Image)
+  cleanPlan: null,       // auto-converted outline (canvas)
+  view: 'clean',
 };
 
 function init() {
@@ -253,6 +259,35 @@ function buildIconPalette() {
   }
 }
 
+// Render the first page of a PDF to a PNG blob using pdf.js
+async function pdfToImageBlob(file) {
+  if (!window.pdfjsLib) {
+    throw new Error('PDF support did not load — check your connection and refresh the page');
+  }
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  const page = await pdf.getPage(1);
+
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(2200 / Math.max(base.width, base.height), 4);
+  const viewport = page.getViewport({ scale });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('Could not render the PDF page');
+  return { blob, numPages: pdf.numPages };
+}
+
 async function loadImage(file) {
   try {
     // Validate file
@@ -260,15 +295,16 @@ async function loadImage(file) {
       throw new Error('No file selected');
     }
 
-    console.log('Loading image:', {
+    console.log('Loading file:', {
       name: file.name,
       size: file.size,
       type: file.type
     });
 
-    // Check if it's an image
-    if (!file.type.startsWith('image/')) {
-      throw new Error(`Invalid file type: ${file.type}. Please upload an image (PNG, JPG, etc.)`);
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+
+    if (!isPdf && !file.type.startsWith('image/')) {
+      throw new Error(`Unsupported file type: ${file.type || 'unknown'}. Upload an image or PDF.`);
     }
 
     // Check file size (max 50MB)
@@ -276,7 +312,17 @@ async function loadImage(file) {
       throw new Error('File is too large. Maximum 50MB allowed.');
     }
 
-    showToast('Loading image...', 'info');
+    let loadSource = file;
+    if (isPdf) {
+      showToast('Converting PDF...', 'info');
+      const { blob, numPages } = await pdfToImageBlob(file);
+      loadSource = blob;
+      if (numPages > 1) {
+        showToast(`PDF has ${numPages} pages — using page 1`, 'info');
+      }
+    } else {
+      showToast('Loading image...', 'info');
+    }
 
     // Show editor before loading to ensure container has dimensions
     const uploadZone = document.getElementById('upload-zone');
@@ -300,16 +346,36 @@ async function loadImage(file) {
     }
 
     // Load the image
-    await state.imageProcessor.loadImage(file);
+    await state.imageProcessor.loadImage(loadSource);
+    state.originalImage = state.imageProcessor.currentImage;
 
     // Hide detection controls
     document.getElementById('detection-controls').style.display = 'none';
 
+    // Auto-convert to a clean floor plan outline
+    showToast('Converting to clean floor plan...', 'info');
+    await new Promise(resolve => setTimeout(resolve, 30)); // let the toast paint
+
+    try {
+      state.cleanPlan = cleanFloorPlan(state.originalImage);
+      state.view = 'clean';
+      state.imageProcessor.currentImage = state.cleanPlan;
+      state.imageProcessor.fitToScreen();
+      state.imageProcessor.render();
+      updateViewToggle();
+      showToast('Converted! Add your symbols — or press "Original" to compare.', 'success');
+    } catch (cleanErr) {
+      console.error('Auto-clean failed, showing original:', cleanErr);
+      state.cleanPlan = null;
+      state.view = 'original';
+      updateViewToggle();
+      showToast('Floor plan loaded (couldn\'t auto-clean this one)', 'info');
+    }
+
     // Render overlay
     state.overlay.render();
 
-    console.log('Image loaded successfully');
-    showToast('Floor plan loaded! Ready to edit.', 'success');
+    console.log('File loaded successfully');
   } catch (err) {
     console.error('Image load error:', err);
 
@@ -337,7 +403,34 @@ function handleCanvasControl(ctrl) {
       state.imageProcessor.fitToScreen();
       state.imageProcessor.render();
       break;
+    case 'toggle-view':
+      toggleView();
+      break;
   }
+}
+
+function toggleView() {
+  if (!state.cleanPlan || !state.originalImage) return;
+
+  state.view = state.view === 'clean' ? 'original' : 'clean';
+  state.imageProcessor.currentImage =
+    state.view === 'clean' ? state.cleanPlan : state.originalImage;
+
+  // Clean plan may be downscaled from the original, so refit to keep alignment
+  state.imageProcessor.fitToScreen();
+  state.imageProcessor.render();
+  state.overlay.render();
+  updateViewToggle();
+}
+
+function updateViewToggle() {
+  const btn = document.getElementById('view-toggle');
+  if (!btn) return;
+  // Button shows the view you'd switch TO
+  btn.textContent = state.view === 'clean' ? 'Original' : 'Clean Plan';
+  btn.title = state.view === 'clean'
+    ? 'Show the original upload'
+    : 'Show the converted clean plan';
 }
 
 function handleAction(action) {
