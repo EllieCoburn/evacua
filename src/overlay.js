@@ -20,6 +20,8 @@ export class Overlay {
     this.drawingRoute = null;
     this.drawingLine = null;
     this.lastMousePos = { x: 0, y: 0 };
+    this.isDragging = false;
+    this.isResizing = false;
     this.history = new History();
 
     this.setupEventListeners();
@@ -29,13 +31,21 @@ export class Overlay {
     this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
+    this.canvas.addEventListener('mouseleave', (e) => this.onMouseUp(e));
     this.canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
+    this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.drawingRoute) {
         this.drawingRoute = null;
         this.render();
       }
     });
+  }
+
+  onHandle(pos) {
+    if (!(this.selectedElement instanceof IconElement)) return false;
+    const h = this.selectedElement.getHandleRect();
+    return pos.x >= h.x && pos.x <= h.x + h.w && pos.y >= h.y && pos.y <= h.y + h.h;
   }
 
   getMousePos(e) {
@@ -48,11 +58,20 @@ export class Overlay {
 
   onMouseDown(e) {
     const pos = this.getMousePos(e);
+    this.lastMousePos = pos;
 
     if (this.currentTool === 'select') {
-      for (const icon of this.icons) {
-        if (icon.contains(pos.x, pos.y)) {
-          this.selectElement(icon);
+      // Resize handle on the selected icon takes priority
+      if (this.onHandle(pos)) {
+        this.isResizing = true;
+        return;
+      }
+
+      // Topmost icon first (last drawn = last in array)
+      for (let i = this.icons.length - 1; i >= 0; i--) {
+        if (this.icons[i].contains(pos.x, pos.y)) {
+          this.selectElement(this.icons[i]);
+          this.isDragging = true;
           return;
         }
       }
@@ -80,10 +99,15 @@ export class Overlay {
       }
       this.render();
     } else if (this.currentTool === 'add-icon') {
-      this.addIcon(this.currentIconType, pos.x, pos.y);
+      // Place ONE icon, select it, and switch straight back to select mode.
+      // Dragging continues from this same press, so place-and-position is
+      // a single gesture.
+      const icon = this.addIcon(this.currentIconType, pos.x, pos.y);
+      this.selectElement(icon);
+      this.currentTool = 'select';
+      this.isDragging = true;
+      this.dispatchToolChange('select');
     }
-
-    this.lastMousePos = pos;
   }
 
   onMouseMove(e) {
@@ -97,25 +121,68 @@ export class Overlay {
         this.drawingRoute.points[this.drawingRoute.points.length - 1] = pos;
       }
       this.render();
-    } else if (this.selectedElement && this.currentTool === 'select') {
+    } else if (this.isResizing && this.selectedElement instanceof IconElement) {
+      // Scale so the handle tracks the cursor
+      const el = this.selectedElement;
+      const half = Math.max(Math.abs(pos.x - el.x), Math.abs(pos.y - el.y)) - 6;
+      const newScale = (half * 2) / el.getIcon().size;
+      el.scale = Math.min(3, Math.max(0.4, newScale));
+      this.render();
+      this.dispatchSelection(el);
+    } else if (this.isDragging && this.selectedElement instanceof IconElement) {
+      // Move only while the mouse button is held
       const dx = pos.x - this.lastMousePos.x;
       const dy = pos.y - this.lastMousePos.y;
-      
-      if (this.selectedElement instanceof IconElement) {
-        this.selectedElement.x += dx;
-        this.selectedElement.y += dy;
-        this.render();
-      }
+      this.selectedElement.x += dx;
+      this.selectedElement.y += dy;
+      this.render();
+    } else {
+      this.updateCursor(pos);
     }
 
     this.lastMousePos = pos;
   }
 
   onMouseUp(e) {
+    this.isDragging = false;
+    this.isResizing = false;
+
     if (this.drawingLine) {
       this.drawingLine = null;
       this.render();
     }
+  }
+
+  onWheel(e) {
+    // Scroll over the selected icon to resize it
+    const pos = this.getMousePos(e);
+    if (
+      this.selectedElement instanceof IconElement &&
+      (this.selectedElement.contains(pos.x, pos.y) || this.onHandle(pos))
+    ) {
+      e.preventDefault();
+      const el = this.selectedElement;
+      el.scale = Math.min(3, Math.max(0.4, el.scale * (e.deltaY < 0 ? 1.1 : 0.9)));
+      this.render();
+      this.dispatchSelection(el);
+    }
+  }
+
+  updateCursor(pos) {
+    let cursor = 'default';
+    if (this.currentTool === 'add-icon' || this.currentTool === 'draw-arrow' || this.currentTool === 'draw-line') {
+      cursor = 'crosshair';
+    } else if (this.onHandle(pos)) {
+      cursor = 'nwse-resize';
+    } else if (this.currentTool === 'select') {
+      for (let i = this.icons.length - 1; i >= 0; i--) {
+        if (this.icons[i].contains(pos.x, pos.y)) {
+          cursor = 'move';
+          break;
+        }
+      }
+    }
+    this.canvas.style.cursor = cursor;
   }
 
   onDoubleClick(e) {
@@ -252,6 +319,11 @@ export class Overlay {
 
   dispatchSelection(element) {
     const event = new CustomEvent('element-selected', { detail: element });
+    window.dispatchEvent(event);
+  }
+
+  dispatchToolChange(tool) {
+    const event = new CustomEvent('tool-changed', { detail: tool });
     window.dispatchEvent(event);
   }
 }

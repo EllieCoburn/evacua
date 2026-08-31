@@ -222,6 +222,13 @@ export class IconElement {
       ctx.setLineDash([5, 4]);
       ctx.strokeRect(-s / 2 - 6, -s / 2 - 6, s + 12, s + 12);
       ctx.setLineDash([]);
+
+      // Resize handle at the bottom-right corner
+      ctx.fillStyle = '#2563eb';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.fillRect(s / 2 + 6 - 7, s / 2 + 6 - 7, 14, 14);
+      ctx.strokeRect(s / 2 + 6 - 7, s / 2 + 6 - 7, 14, 14);
     }
 
     if (this.label) {
@@ -241,6 +248,12 @@ export class IconElement {
   getBounds() {
     const s = this.getIcon().size * this.scale;
     return { x: this.x - s / 2, y: this.y - s / 2, width: s, height: s };
+  }
+
+  getHandleRect() {
+    const s = this.getIcon().size * this.scale;
+    // Matches the handle drawn in draw(); padded slightly for easier grabbing
+    return { x: this.x + s / 2 - 3, y: this.y + s / 2 - 3, w: 18, h: 18 };
   }
 
   contains(x, y) {

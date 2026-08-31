@@ -188,6 +188,9 @@ function setupEventListeners() {
   });
 
   document.addEventListener('keydown', (e) => {
+    // Don't hijack keys while typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
     if (e.key === '+' || e.key === '=') {
       e.preventDefault();
       state.imageProcessor.zoomIn();
@@ -198,12 +201,99 @@ function setupEventListeners() {
       e.preventDefault();
       state.imageProcessor.fitToScreen();
       state.imageProcessor.render();
-    } else if (e.key === 'Delete') {
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
       if (state.overlay.selectedElement) {
+        e.preventDefault();
         state.overlay.removeElement(state.overlay.selectedElement);
+        state.overlay.selectElement(null);
       }
+    } else if (e.key.startsWith('Arrow') && state.overlay.selectedElement?.x !== undefined) {
+      // Nudge the selected icon into the perfect spot: 1px, or 10px with Shift
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      const el = state.overlay.selectedElement;
+      if (e.key === 'ArrowLeft') el.x -= step;
+      if (e.key === 'ArrowRight') el.x += step;
+      if (e.key === 'ArrowUp') el.y -= step;
+      if (e.key === 'ArrowDown') el.y += step;
+      state.overlay.render();
     }
   });
+
+  // After placing an icon the overlay switches itself back to select mode —
+  // reflect that in the palette and tool buttons
+  window.addEventListener('tool-changed', (e) => {
+    document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('[data-tool]').forEach(b => {
+      b.classList.toggle('active', b.dataset.tool === e.detail);
+    });
+  });
+
+  window.addEventListener('element-selected', (e) => {
+    updatePropsPanel(e.detail);
+  });
+}
+
+function updatePropsPanel(element) {
+  const panel = document.getElementById('props-panel');
+  if (!panel) return;
+
+  if (!element) {
+    panel.innerHTML = '<p style="color: var(--c-fg-muted); font-size: 12px;">Select an element to view/edit properties</p>';
+    return;
+  }
+
+  panel.innerHTML = '';
+
+  const title = document.createElement('h4');
+  title.textContent = ICONS[element.type]?.name || 'Element';
+  title.style.cssText = 'margin: 0 0 12px; font-size: 13px;';
+  panel.appendChild(title);
+
+  // Icons get a size slider and a label field; routes get delete only
+  if (element.scale !== undefined) {
+    const sizeLabel = document.createElement('label');
+    sizeLabel.style.cssText = 'display: block; margin-bottom: 12px; font-size: 12px;';
+    sizeLabel.textContent = 'Size';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0.4';
+    slider.max = '3';
+    slider.step = '0.05';
+    slider.value = String(element.scale);
+    slider.style.cssText = 'width: 100%; margin-top: 4px;';
+    slider.addEventListener('input', () => {
+      element.scale = parseFloat(slider.value);
+      state.overlay.render();
+    });
+    sizeLabel.appendChild(slider);
+    panel.appendChild(sizeLabel);
+
+    const labelLabel = document.createElement('label');
+    labelLabel.style.cssText = 'display: block; margin-bottom: 12px; font-size: 12px;';
+    labelLabel.textContent = 'Label (shown under the symbol)';
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.placeholder = 'e.g. EXIT 2';
+    labelInput.value = element.label || '';
+    labelInput.style.cssText = 'width: 100%; margin-top: 4px; padding: 6px; box-sizing: border-box;';
+    labelInput.addEventListener('input', () => {
+      element.label = labelInput.value;
+      state.overlay.render();
+    });
+    labelLabel.appendChild(labelInput);
+    panel.appendChild(labelLabel);
+  }
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn';
+  delBtn.textContent = 'Delete';
+  delBtn.style.cssText = 'width: 100%; color: #dc2626;';
+  delBtn.addEventListener('click', () => {
+    state.overlay.removeElement(element);
+    state.overlay.selectElement(null);
+  });
+  panel.appendChild(delBtn);
 }
 
 function setupToolButtons() {
