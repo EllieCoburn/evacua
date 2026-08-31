@@ -263,16 +263,22 @@ function setupEventListeners() {
         state.overlay.removeElement(state.overlay.selectedElement);
         state.overlay.selectElement(null);
       }
-    } else if (e.key.startsWith('Arrow') && state.overlay.selectedElement?.x !== undefined) {
-      // Nudge the selected icon into the perfect spot: 1px, or 10px with Shift
-      e.preventDefault();
-      const step = e.shiftKey ? 10 : 1;
+    } else if (e.key.startsWith('Arrow') && state.overlay.selectedElement) {
+      // Nudge the selected element into the perfect spot: 1px, or 10px with Shift
       const el = state.overlay.selectedElement;
-      if (e.key === 'ArrowLeft') el.x -= step;
-      if (e.key === 'ArrowRight') el.x += step;
-      if (e.key === 'ArrowUp') el.y -= step;
-      if (e.key === 'ArrowDown') el.y += step;
-      state.overlay.render();
+      const step = e.shiftKey ? 10 : 1;
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+      if (typeof el.moveBy === 'function') {
+        e.preventDefault();
+        el.moveBy(dx, dy);
+        state.overlay.render();
+      } else if (el.x !== undefined) {
+        e.preventDefault();
+        el.x += dx;
+        el.y += dy;
+        state.overlay.render();
+      }
     }
   });
 
@@ -302,9 +308,43 @@ function updatePropsPanel(element) {
   panel.innerHTML = '';
 
   const title = document.createElement('h4');
-  title.textContent = ICONS[element.type]?.name || 'Element';
+  title.textContent = ICONS[element.type]?.name || element.typeName || 'Element';
   title.style.cssText = 'margin: 0 0 12px; font-size: 13px;';
   panel.appendChild(title);
+
+  // Text labels: edit the text and font size
+  if (element.text !== undefined) {
+    const textLabel = document.createElement('label');
+    textLabel.style.cssText = 'display: block; margin-bottom: 12px; font-size: 12px;';
+    textLabel.textContent = 'Text';
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.value = element.text;
+    textInput.style.cssText = 'width: 100%; margin-top: 4px; padding: 6px; box-sizing: border-box;';
+    textInput.addEventListener('input', () => {
+      element.text = textInput.value;
+      state.overlay.render();
+    });
+    textLabel.appendChild(textInput);
+    panel.appendChild(textLabel);
+
+    const sizeLabel = document.createElement('label');
+    sizeLabel.style.cssText = 'display: block; margin-bottom: 12px; font-size: 12px;';
+    sizeLabel.textContent = 'Text Size';
+    const sizeSlider = document.createElement('input');
+    sizeSlider.type = 'range';
+    sizeSlider.min = '10';
+    sizeSlider.max = '48';
+    sizeSlider.step = '1';
+    sizeSlider.value = String(element.fontSize);
+    sizeSlider.style.cssText = 'width: 100%; margin-top: 4px;';
+    sizeSlider.addEventListener('input', () => {
+      element.fontSize = parseInt(sizeSlider.value);
+      state.overlay.render();
+    });
+    sizeLabel.appendChild(sizeSlider);
+    panel.appendChild(sizeLabel);
+  }
 
   // Icons get a size slider and a label field; routes get delete only
   if (element.scale !== undefined) {
@@ -352,15 +392,24 @@ function updatePropsPanel(element) {
   panel.appendChild(delBtn);
 }
 
+const TOOL_HINTS = {
+  'draw-line': 'Wall Line: drag to draw a wall segment',
+  'arrow': 'Arrow: drag from tail to tip',
+  'text': 'Text: click the map, then type your label',
+  'erase': 'Erase: click any element to delete it',
+};
+
 function setupToolButtons() {
   document.querySelectorAll('[data-tool]').forEach(btn => {
     btn.addEventListener('click', () => {
       const tool = btn.dataset.tool;
-      
+
       document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
       state.overlay.setTool(tool);
+      if (TOOL_HINTS[tool]) showToast(TOOL_HINTS[tool], 'info');
     });
   });
 }

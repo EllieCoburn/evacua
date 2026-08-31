@@ -1,6 +1,7 @@
 // Overlay management - handles icons, routes, and annotations
 
 import { IconElement, RouteElement, ICONS, getIconImage } from './icon-library.js';
+import { LineElement, ArrowElement, TextElement, annotationFromJSON } from './annotations.js';
 import { History } from './history.js';
 
 export class Overlay {
@@ -8,17 +9,17 @@ export class Overlay {
     this.canvas = overlayCanvas;
     this.ctx = overlayCanvas.getContext('2d');
     this.imageProcessor = imageProcessor;
-    
+
     this.icons = [];
     this.routes = [];
-    this.labels = [];
-    this.lines = [];
-    
+    this.annotations = []; // wall lines, arrows, text labels
+
     this.selectedElement = null;
     this.currentTool = 'select';
     this.currentIconType = null;
     this.drawingRoute = null;
-    this.drawingLine = null;
+    this.drawingLine = null;   // {start, end} preview for line tool
+    this.drawingArrow = null;  // {start, end} preview for arrow tool
     this.lastMousePos = { x: 0, y: 0 };
     this.isDragging = false;
     this.isResizing = false;
@@ -114,6 +115,14 @@ export class Overlay {
         }
       }
 
+      for (let i = this.annotations.length - 1; i >= 0; i--) {
+        if (this.annotations[i].contains(pos.x, pos.y)) {
+          this.selectElement(this.annotations[i]);
+          this.isDragging = true;
+          return;
+        }
+      }
+
       for (const route of this.routes) {
         if (route.contains(pos.x, pos.y)) {
           this.selectElement(route);
@@ -122,8 +131,28 @@ export class Overlay {
       }
 
       this.selectElement(null);
+    } else if (this.currentTool === 'erase') {
+      const hit = this.hitTestAll(pos);
+      if (hit) {
+        this.removeElement(hit);
+        if (this.selectedElement === hit) this.selectElement(null);
+      }
+    } else if (this.currentTool === 'text') {
+      const text = window.prompt('Label text:', '');
+      if (text && text.trim()) {
+        const label = new TextElement(pos.x, pos.y, text.trim());
+        this.annotations.push(label);
+        this.selectElement(label);
+        this.currentTool = 'select';
+        this.dispatchToolChange('select');
+      }
     } else if (this.currentTool === 'draw-line') {
       this.drawingLine = {
+        start: pos,
+        end: pos
+      };
+    } else if (this.currentTool === 'arrow') {
+      this.drawingArrow = {
         start: pos,
         end: pos
       };
@@ -154,6 +183,9 @@ export class Overlay {
     if (this.drawingLine) {
       this.drawingLine.end = pos;
       this.render();
+    } else if (this.drawingArrow) {
+      this.drawingArrow.end = pos;
+      this.render();
     } else if (this.drawingRoute && this.currentTool === 'draw-arrow') {
       if (this.drawingRoute.points.length > 0) {
         this.drawingRoute.points[this.drawingRoute.points.length - 1] = pos;
@@ -167,13 +199,19 @@ export class Overlay {
       el.scale = Math.min(3, Math.max(0.4, newScale));
       this.render();
       this.dispatchSelection(el);
-    } else if (this.isDragging && this.selectedElement instanceof IconElement) {
+    } else if (this.isDragging && this.selectedElement) {
       // Move only while the mouse button is held
       const dx = pos.x - this.lastMousePos.x;
       const dy = pos.y - this.lastMousePos.y;
-      this.selectedElement.x += dx;
-      this.selectedElement.y += dy;
-      this.render();
+      const el = this.selectedElement;
+      if (typeof el.moveBy === 'function') {
+        el.moveBy(dx, dy);
+        this.render();
+      } else if (el instanceof IconElement) {
+        el.x += dx;
+        el.y += dy;
+        this.render();
+      }
     } else {
       this.updateCursor(pos);
     }
@@ -186,9 +224,35 @@ export class Overlay {
     this.isResizing = false;
 
     if (this.drawingLine) {
+      const { start, end } = this.drawingLine;
       this.drawingLine = null;
+      if (Math.hypot(end.x - start.x, end.y - start.y) > 5) {
+        this.annotations.push(new LineElement(start.x, start.y, end.x, end.y));
+      }
       this.render();
     }
+
+    if (this.drawingArrow) {
+      const { start, end } = this.drawingArrow;
+      this.drawingArrow = null;
+      if (Math.hypot(end.x - start.x, end.y - start.y) > 8) {
+        this.annotations.push(new ArrowElement(start.x, start.y, end.x, end.y));
+      }
+      this.render();
+    }
+  }
+
+  hitTestAll(pos) {
+    for (let i = this.icons.length - 1; i >= 0; i--) {
+      if (this.icons[i].contains(pos.x, pos.y)) return this.icons[i];
+    }
+    for (let i = this.annotations.length - 1; i >= 0; i--) {
+      if (this.annotations[i].contains(pos.x, pos.y)) return this.annotations[i];
+    }
+    for (let i = this.routes.length - 1; i >= 0; i--) {
+      if (this.routes[i].contains(pos.x, pos.y)) return this.routes[i];
+    }
+    return null;
   }
 
   onWheel(e) {
@@ -207,18 +271,17 @@ export class Overlay {
   }
 
   updateCursor(pos) {
+    const drawTools = ['add-icon', 'draw-arrow', 'draw-line', 'arrow', 'text'];
     let cursor = 'default';
-    if (this.currentTool === 'add-icon' || this.currentTool === 'draw-arrow' || this.currentTool === 'draw-line') {
+    if (drawTools.includes(this.currentTool)) {
       cursor = 'crosshair';
+    } else if (this.currentTool === 'erase') {
+      cursor = this.hitTestAll(pos) ? 'pointer' : 'crosshair';
     } else if (this.onHandle(pos)) {
       cursor = 'nwse-resize';
     } else if (this.currentTool === 'select') {
-      for (let i = this.icons.length - 1; i >= 0; i--) {
-        if (this.icons[i].contains(pos.x, pos.y)) {
-          cursor = 'move';
-          break;
-        }
-      }
+      const hit = this.hitTestAll(pos);
+      if (hit) cursor = 'move';
     }
     this.canvas.style.cursor = cursor;
   }
@@ -253,6 +316,12 @@ export class Overlay {
         this.routes.splice(idx, 1);
         this.history.push({ action: 'remove-route', element });
       }
+    } else {
+      const idx = this.annotations.indexOf(element);
+      if (idx !== -1) {
+        this.annotations.splice(idx, 1);
+        this.history.push({ action: 'remove-annotation', element });
+      }
     }
     this.render();
   }
@@ -278,6 +347,7 @@ export class Overlay {
       this.finishRoute(true);
     }
     this.drawingLine = null;
+    this.drawingArrow = null;
     this.isDragging = false;
     this.isResizing = false;
 
@@ -290,6 +360,7 @@ export class Overlay {
       this.finishRoute(true);
     }
     this.drawingLine = null;
+    this.drawingArrow = null;
     this.isDragging = false;
     this.isResizing = false;
 
@@ -307,15 +378,31 @@ export class Overlay {
       route.draw(this.ctx);
     }
 
+    for (const annotation of this.annotations) {
+      annotation.draw(this.ctx);
+    }
+
+    // Live previews while drawing
     if (this.drawingLine) {
-      this.ctx.strokeStyle = '#999';
-      this.ctx.lineWidth = 2;
-      this.ctx.setLineDash([5, 5]);
+      this.ctx.strokeStyle = '#1a1a1a';
+      this.ctx.lineWidth = 4;
+      this.ctx.lineCap = 'round';
+      this.ctx.globalAlpha = 0.7;
       this.ctx.beginPath();
       this.ctx.moveTo(this.drawingLine.start.x, this.drawingLine.start.y);
       this.ctx.lineTo(this.drawingLine.end.x, this.drawingLine.end.y);
       this.ctx.stroke();
-      this.ctx.setLineDash([]);
+      this.ctx.globalAlpha = 1;
+    }
+
+    if (this.drawingArrow) {
+      const preview = new ArrowElement(
+        this.drawingArrow.start.x, this.drawingArrow.start.y,
+        this.drawingArrow.end.x, this.drawingArrow.end.y
+      );
+      this.ctx.globalAlpha = 0.7;
+      preview.draw(this.ctx);
+      this.ctx.globalAlpha = 1;
     }
 
     for (const icon of this.icons) {
@@ -503,13 +590,17 @@ export class Overlay {
   export() {
     return {
       icons: this.icons.map(i => i.toJSON()),
-      routes: this.routes.map(r => r.toJSON())
+      routes: this.routes.map(r => r.toJSON()),
+      annotations: this.annotations.map(a => a.toJSON())
     };
   }
 
   import(data) {
-    this.icons = data.icons.map(i => IconElement.fromJSON(i));
-    this.routes = data.routes.map(r => RouteElement.fromJSON(r));
+    this.icons = (data.icons || []).map(i => IconElement.fromJSON(i));
+    this.routes = (data.routes || []).map(r => RouteElement.fromJSON(r));
+    this.annotations = (data.annotations || [])
+      .map(a => annotationFromJSON(a))
+      .filter(Boolean);
     this.render();
   }
 
